@@ -7,6 +7,9 @@ import (
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/mcuadros/go-syslog.v2/format"
 	"net"
+	"strconv"
+	"strings"
+	"time"
 )
 
 func listen(ctx context.Context, host string, port int) error {
@@ -98,8 +101,35 @@ func handleUDP(ctx context.Context, conn net.PacketConn) error {
 				continue L
 			}
 			parts := p.Dump()
-			b, _ := json.Marshal(parts)
-			fmt.Println(addr.String(), string(b))
+			hostname, ok := parts["hostname"].(string)
+			if !ok {
+				continue L
+			}
+			timestamp, ok := parts["timestamp"].(time.Time)
+			if !ok {
+				continue L
+			}
+			content, ok := parts["content"].(string)
+			if !ok {
+				continue L
+			}
+			fields := strings.Fields(content)
+			if len(fields) == 0 {
+				continue L
+			}
+			m := make(map[string]string)
+			for _, field := range fields {
+				fieldParts := strings.SplitN(field, "=", 2)
+				if len(fieldParts) == 2 {
+					v, err := strconv.Unquote(fieldParts[1])
+					if err == nil {
+						m[fieldParts[0]] = v
+					}
+				}
+			}
+
+			b, _ := json.Marshal(m)
+			fmt.Println(addr.String(), hostname, timestamp.Format(time.RFC3339), string(b))
 		}
 		if err != nil {
 			return err
