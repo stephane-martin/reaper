@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"golang.org/x/sync/errgroup"
+	"gopkg.in/mcuadros/go-syslog.v2/format"
 	"net"
 )
 
@@ -84,11 +86,20 @@ func handleTCP(ctx context.Context, conn net.Conn) error {
 
 func handleUDP(ctx context.Context, conn net.PacketConn) error {
 	buf := make([]byte, 65536)
+	var f format.RFC3164
+
+	L:
 	for {
 		n, addr, err := conn.ReadFrom(buf)
 		if n > 0 {
-			lbuf := buf[:n]
-			fmt.Println(addr.String(), string(lbuf))
+			p := f.GetParser(buf[:n])
+			err := p.Parse()
+			if err != nil {
+				continue L
+			}
+			parts := p.Dump()
+			b, _ := json.Marshal(parts)
+			fmt.Println(addr.String(), string(b))
 		}
 		if err != nil {
 			return err
