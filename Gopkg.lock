@@ -18,10 +18,9 @@
   revision = "37e7f081c4d4c64e13b10787722085407fe5d15f"
 
 [[projects]]
-  digest = "1:0e2384e743a5fba9c3d872bc972363608b6498f71125dcf93fc52aa28e569182"
+  digest = "1:005eef14babbeaaa78c1be5df061a7ea00c3dfd93b41e02d2093a64bffca446e"
   name = "gopkg.in/mcuadros/go-syslog.v2"
   packages = [
-    ".",
     "format",
     "internal/syslogparser",
     "internal/syslogparser/rfc3164",
@@ -37,7 +36,7 @@
   input-imports = [
     "github.com/urfave/cli",
     "golang.org/x/sync/errgroup",
-    "gopkg.in/mcuadros/go-syslog.v2",
+    "gopkg.in/mcuadros/go-syslog.v2/format",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

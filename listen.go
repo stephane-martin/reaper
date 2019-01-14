@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/mcuadros/go-syslog.v2/format"
@@ -12,19 +11,19 @@ import (
 	"time"
 )
 
-func listen(ctx context.Context, host string, port int) error {
+func listen(ctx context.Context, host string, port int, entries chan *Entry) error {
 	g, lctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		return listenTCP(lctx, host, port)
+		return listenTCP(lctx, host, port, entries)
 	})
 	g.Go(func() error {
-		return listenUDP(lctx, host, port)
+		return listenUDP(lctx, host, port, entries)
 	})
 	return g.Wait()
 }
 
 
-func listenUDP(ctx context.Context, host string, port int) error {
+func listenUDP(ctx context.Context, host string, port int, entries chan *Entry) error {
 	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 	pconn, err := net.ListenPacket("udp", addr)
 	if err != nil {
@@ -40,13 +39,13 @@ func listenUDP(ctx context.Context, host string, port int) error {
 	})
 
 	g.Go(func() error {
-		return handleUDP(lctx, pconn)
+		return handleUDP(lctx, pconn, entries)
 	})
 
 	return g.Wait()
 }
 
-func listenTCP(ctx context.Context, host string, port int) error {
+func listenTCP(ctx context.Context, host string, port int, entries chan *Entry) error {
 	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -72,22 +71,20 @@ func listenTCP(ctx context.Context, host string, port int) error {
 				return lctx.Err()
 			})
 			g.Go(func() error {
-				return handleTCP(lctx, conn)
+				return handleTCP(lctx, conn, entries)
 			})
 		}
 	})
 
 	return g.Wait()
-
 }
 
 
-
-func handleTCP(ctx context.Context, conn net.Conn) error {
+func handleTCP(ctx context.Context, conn net.Conn, entries chan *Entry) error {
 	return nil
 }
 
-func handleUDP(ctx context.Context, conn net.PacketConn) error {
+func handleUDP(ctx context.Context, conn net.PacketConn, entries chan *Entry) error {
 	buf := make([]byte, 65536)
 	var f format.RFC3164
 
@@ -101,35 +98,60 @@ func handleUDP(ctx context.Context, conn net.PacketConn) error {
 				continue L
 			}
 			parts := p.Dump()
-			hostname, ok := parts["hostname"].(string)
-			if !ok {
-				continue L
+
+			hostname := ""
+			if parts["hostname"] != nil {
+				h, ok := parts["hostname"].(string)
+				if !ok {
+					continue L
+				}
+				hostname = h
 			}
-			timestamp, ok := parts["timestamp"].(time.Time)
-			if !ok {
-				continue L
+
+			var timestamp *time.Time
+			if parts["timestamp"] != nil {
+				t, ok := parts["timestamp"].(time.Time)
+				if !ok {
+					continue L
+				}
+				timestamp = &t
 			}
-			content, ok := parts["content"].(string)
-			if !ok {
-				continue L
+
+			entry := &Entry{
+				SyslogHostname: hostname,
+				SyslogTimestamp: timestamp,
+				SyslogRemoteAddr: addr.String(),
 			}
-			fields := strings.Fields(content)
-			if len(fields) == 0 {
-				continue L
-			}
-			m := make(map[string]string)
-			for _, field := range fields {
-				fieldParts := strings.SplitN(field, "=", 2)
-				if len(fieldParts) == 2 {
-					v, err := strconv.Unquote(fieldParts[1])
-					if err == nil {
-						m[fieldParts[0]] = v
+
+			if parts["content"] != nil {
+				content, ok := parts["content"].(string)
+				if !ok {
+					continue L
+				}
+				fields := strings.Fields(content)
+				if len(fields) == 0 {
+					continue L
+				}
+				m := make(map[string]string)
+				for _, field := range fields {
+					fieldParts := strings.SplitN(field, "=", 2)
+					if len(fieldParts) == 2 {
+						v, err := strconv.Unquote(fieldParts[1])
+						if err == nil {
+							m[fieldParts[0]] = v
+						}
 					}
+				}
+				if len(m) > 0 {
+					entry.Fields = m
 				}
 			}
 
-			b, _ := json.Marshal(m)
-			fmt.Println(addr.String(), hostname, timestamp.Format(time.RFC3339), string(b))
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case entries <- entry:
+			}
 		}
 		if err != nil {
 			return err

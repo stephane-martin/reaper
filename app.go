@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/urfave/cli"
 	"os"
@@ -32,7 +33,16 @@ func BuildApp() *cli.App {
 	}
 
 	app.Action = func(c *cli.Context) error {
-		_ = listen(context.Background(), c.GlobalString("addr"), c.GlobalInt("port"))
+		entries := make(chan *Entry)
+		go func() {
+			_ = listen(context.Background(), c.GlobalString("addr"), c.GlobalInt("port"), entries)
+		}()
+		for entry := range entries {
+			b, err := json.Marshal(entry)
+			if err == nil {
+				fmt.Println(string(b))
+			}
+		}
 		return nil
 	}
 
