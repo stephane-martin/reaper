@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"github.com/inconshreveable/log15"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/mcuadros/go-syslog.v2/format"
 	"net"
@@ -11,80 +11,83 @@ import (
 	"time"
 )
 
-func listen(ctx context.Context, host string, port int, entries chan *Entry) error {
+func listen(ctx context.Context, tcp []string, udp []string, entries chan *Entry, l Logger) error {
 	g, lctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		return listenTCP(lctx, host, port, entries)
+		return listenTCP(lctx, tcp, entries, l)
 	})
 	g.Go(func() error {
-		return listenUDP(lctx, host, port, entries)
+		return listenUDP(lctx, udp, entries, l)
 	})
 	return g.Wait()
 }
 
 
-func listenUDP(ctx context.Context, host string, port int, entries chan *Entry) error {
-	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
-	pconn, err := net.ListenPacket("udp", addr)
-	if err != nil {
-		return err
-	}
-
+func listenUDP(ctx context.Context, udp []string, entries chan *Entry, l Logger) error {
 	g, lctx := errgroup.WithContext(ctx)
 
-	g.Go(func() error {
-		<-lctx.Done()
-		_ = pconn.Close()
-		return lctx.Err()
-	})
-
-	g.Go(func() error {
-		return handleUDP(lctx, pconn, entries)
-	})
-
-	return g.Wait()
-}
-
-func listenTCP(ctx context.Context, host string, port int, entries chan *Entry) error {
-	addr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
-	}
-	g, lctx := errgroup.WithContext(ctx)
-
-	g.Go(func() error {
-		<-lctx.Done()
-		_ = listener.Close()
-		return lctx.Err()
-	})
-
-	g.Go(func() error {
-		for {
-			conn, err := listener.Accept()
+	for _, udpAddr := range udp {
+		addr := udpAddr
+		l.Info("Listen on UDP", "addr", addr)
+		g.Go(func() error {
+			pconn, err := net.ListenPacket("udp", addr)
 			if err != nil {
 				return err
 			}
 			g.Go(func() error {
 				<-lctx.Done()
-				_ = conn.Close()
+				_ = pconn.Close()
 				return lctx.Err()
 			})
+			return handleUDP(lctx, pconn, entries, l)
+		})
+	}
+
+	return g.Wait()
+}
+
+func listenTCP(ctx context.Context, tcp []string, entries chan *Entry, l log15.Logger) error {
+	g, lctx := errgroup.WithContext(ctx)
+
+	for _, tcpAddr := range tcp {
+		addr := tcpAddr
+		l.Info("Listen on TCP", "addr", addr)
+		g.Go(func() error {
+			listener, err := net.Listen("tcp", addr)
+			if err != nil {
+				return err
+			}
 			g.Go(func() error {
-				return handleTCP(lctx, conn, entries)
+				<-lctx.Done()
+				_ = listener.Close()
+				return lctx.Err()
 			})
-		}
-	})
+			for {
+				conn, err := listener.Accept()
+				if err != nil {
+					return err
+				}
+				g.Go(func() error {
+					<-lctx.Done()
+					_ = conn.Close()
+					return lctx.Err()
+				})
+				g.Go(func() error {
+					return handleTCP(lctx, conn, entries, l)
+				})
+			}
+		})
+	}
 
 	return g.Wait()
 }
 
 
-func handleTCP(ctx context.Context, conn net.Conn, entries chan *Entry) error {
+func handleTCP(ctx context.Context, conn net.Conn, entries chan *Entry, l log15.Logger) error {
 	return nil
 }
 
-func handleUDP(ctx context.Context, conn net.PacketConn, entries chan *Entry) error {
+func handleUDP(ctx context.Context, conn net.PacketConn, entries chan *Entry, l log15.Logger) error {
 	buf := make([]byte, 65536)
 	var f format.RFC3164
 
@@ -118,6 +121,7 @@ func handleUDP(ctx context.Context, conn net.PacketConn, entries chan *Entry) er
 			}
 
 			entry := &Entry{
+				UID: NewULID().String(),
 				SyslogHostname: hostname,
 				SyslogTimestamp: timestamp,
 				SyslogRemoteAddr: addr.String(),

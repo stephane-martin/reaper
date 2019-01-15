@@ -2,6 +2,111 @@
 
 
 [[projects]]
+  digest = "1:68796ba90e9d131bfcdac0e5a10bed1edf2911c473eb3b0faaa2a13314c87e33"
+  name = "github.com/blang/semver"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "9bf7bff48b0388cb75991e58c6df7d13e982f1f2"
+
+[[projects]]
+  digest = "1:baad5bb94a302bbe6ba073c5e106f5e4282436fb7931a13e81083ee98e9700a3"
+  name = "github.com/bmizerany/perks"
+  packages = ["quantile"]
+  pruneopts = "UT"
+  revision = "6cb9d9d729303ee2628580d9aec5db968da3a607"
+
+[[projects]]
+  digest = "1:586ea76dbd0374d6fb649a91d70d652b7fe0ccffb8910a77468e7702e7901f3d"
+  name = "github.com/go-stack/stack"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "2fee6af1a9795aafbe0253a0cfbdf668e1fb8a9a"
+  version = "v1.8.0"
+
+[[projects]]
+  digest = "1:06c8168453decb3d6db47d2fcac0f58332a535631fae7e63238e481e827f5258"
+  name = "github.com/golang/snappy"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "d9eb7a3d35ec988b8585d4a0068e462c27d28380"
+
+[[projects]]
+  digest = "1:e96640e5b9ce93e2d7ee18f48048483080fd23e72e3c38bc17e9c8b77062031a"
+  name = "github.com/inconshreveable/log15"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "67afb5ed74ec82fd7ac8f49d27c509ac6f991970"
+  version = "v2.14"
+
+[[projects]]
+  digest = "1:c3429342936e13e60069d0a38829a71d1f016710c1f4dd71e89f2d35ca5fd59a"
+  name = "github.com/julienschmidt/httprouter"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "6aacfd5ab513e34f7e64ea9627ab9670371b34e7"
+
+[[projects]]
+  digest = "1:c658e84ad3916da105a761660dcaeb01e63416c8ec7bc62256a9b411a05fcd67"
+  name = "github.com/mattn/go-colorable"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "167de6bfdfba052fa6b2d3664c8f5272e23c9072"
+  version = "v0.0.9"
+
+[[projects]]
+  digest = "1:0981502f9816113c9c8c4ac301583841855c8cf4da8c72f696b3ebedf6d0e4e5"
+  name = "github.com/mattn/go-isatty"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "6ca4dbf54d38eea1a992b3c722a76a5d1c4cb25c"
+  version = "v0.0.4"
+
+[[projects]]
+  digest = "1:c860f5fbd258153579059cea53aa2787978e2c9f1dc7f097b0de2ab6515335a0"
+  name = "github.com/nsqio/go-diskqueue"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "0681a1afee1245efa503b7543989fc26d8f268bc"
+
+[[projects]]
+  digest = "1:dba59765d6c4bf0676f85391ea24f7a36771fbd98ea863704ca740d7a6c849ff"
+  name = "github.com/nsqio/go-nsq"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "a53d495e81424aaf7a7665a9d32a97715c40e953"
+
+[[projects]]
+  digest = "1:a95f875b58923d100293883e74ae52dfa3d3858f4d00bd5f1e96a3c24cd6c29e"
+  name = "github.com/nsqio/nsq"
+  packages = [
+    "internal/auth",
+    "internal/clusterinfo",
+    "internal/dirlock",
+    "internal/http_api",
+    "internal/lg",
+    "internal/pqueue",
+    "internal/protocol",
+    "internal/quantile",
+    "internal/statsd",
+    "internal/stringy",
+    "internal/util",
+    "internal/version",
+    "internal/writers",
+    "nsqd",
+  ]
+  pruneopts = "UT"
+  revision = "d22e9cf29f4caaef4819a04b93230b3a69a2d84e"
+  version = "v1.1.0"
+
+[[projects]]
+  digest = "1:4f5513cb656b73fb4c4f77ccd482c8366d6290278564d2b1d3285f45e45f4a1e"
+  name = "github.com/oklog/ulid"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "02a8604050d8466dd915307496174adb9be4593a"
+  version = "v1.3.1"
+
+[[projects]]
   digest = "1:b24d38b282bacf9791408a080f606370efa3d364e4b5fd9ba0f7b87786d3b679"
   name = "github.com/urfave/cli"
   packages = ["."]
@@ -16,6 +121,14 @@
   packages = ["errgroup"]
   pruneopts = "UT"
   revision = "37e7f081c4d4c64e13b10787722085407fe5d15f"
+
+[[projects]]
+  branch = "master"
+  digest = "1:fe2af5c0e6b4188bb1907e051cd086dae4f7ab3a2f4c1b62c03fefca848ab900"
+  name = "golang.org/x/sys"
+  packages = ["unix"]
+  pruneopts = "UT"
+  revision = "a457fd036447854c0c02e89ea439481bdcf941a2"
 
 [[projects]]
   digest = "1:005eef14babbeaaa78c1be5df061a7ea00c3dfd93b41e02d2093a64bffca446e"
@@ -34,6 +147,10 @@
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
+    "github.com/inconshreveable/log15",
+    "github.com/nsqio/go-nsq",
+    "github.com/nsqio/nsq/nsqd",
+    "github.com/oklog/ulid",
     "github.com/urfave/cli",
     "golang.org/x/sync/errgroup",
     "gopkg.in/mcuadros/go-syslog.v2/format",
