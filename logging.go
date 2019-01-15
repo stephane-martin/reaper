@@ -10,7 +10,6 @@ type Logger struct {
 }
 
 func (l Logger) Output(maxDepth int, s string) error {
-	// TODO
 	if len(s) < 5 {
 		l.Logger.Info(s)
 		return nil

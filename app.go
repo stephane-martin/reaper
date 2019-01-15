@@ -38,6 +38,16 @@ func buildNSQDOptions(c *cli.Context, l Logger) (*nsqd.Options, error) {
 	return opts, nil
 }
 
+func listenSignals(cancel context.CancelFunc) {
+	sigchan := make(chan os.Signal, 1)
+	signal.Notify(sigchan, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		for range sigchan {
+			cancel()
+		}
+	}()
+}
+
 func BuildApp() *cli.App {
 	app := cli.NewApp()
 	app.Name = "reaper"
@@ -88,34 +98,19 @@ func BuildApp() *cli.App {
 		if err != nil {
 			return cli.NewExitError(err.Error(), 1)
 		}
-
-
 		ctx, cancel := context.WithCancel(context.Background())
-		sigchan := make(chan os.Signal, 1)
-		signal.Notify(sigchan, syscall.SIGTERM, syscall.SIGINT)
-		go func() {
-			for range sigchan {
-				logger.Info("Signal received")
-				cancel()
-			}
-		}()
-
+		listenSignals(cancel)
 		g, lctx := errgroup.WithContext(ctx)
-
-		entries := make(chan *Entry)
+		incoming := make(chan *Entry, 10000)
+		tcpAddrs := c.GlobalStringSlice("tcp")
+		udpAddrs := c.GlobalStringSlice("udp")
 
 		g.Go(func() error {
-			return NSQD(lctx, nsqdOpts, entries, logger)
+			return NSQD(lctx, nsqdOpts, incoming, nil, logger)
 		})
 
 		g.Go(func() error {
-			return listen(
-				lctx,
-				c.GlobalStringSlice("tcp"),
-				c.GlobalStringSlice("udp"),
-				entries,
-				logger,
-			)
+			return listen(lctx, tcpAddrs, udpAddrs, incoming, logger)
 		})
 
 		err = g.Wait()
@@ -138,7 +133,40 @@ func BuildApp() *cli.App {
 			Name:  "stdout",
 			Usage: "just write access logs to stdout",
 			Action: func(c *cli.Context) error {
+				logger := NewLogger(c.GlobalString("loglevel"))
+				nsqdOpts, err := buildNSQDOptions(c, logger)
+				if err != nil {
+					return cli.NewExitError(err.Error(), 1)
+				}
+				ctx, cancel := context.WithCancel(context.Background())
+				listenSignals(cancel)
+				g, lctx := errgroup.WithContext(ctx)
+				incoming := make(chan *Entry, 10000)
+				outcoming := make(chan *Entry)
+				tcpAddrs := c.GlobalStringSlice("tcp")
+				udpAddrs := c.GlobalStringSlice("udp")
+
+				g.Go(func() error {
+					return NSQD(lctx, nsqdOpts, incoming, outcoming, logger)
+				})
+
+				g.Go(func() error {
+					return listen(lctx, tcpAddrs, udpAddrs, incoming, logger)
+				})
+
+				g.Go(func() error {
+					for entry := range outcoming {
+						fmt.Println(entry)
+					}
+					return nil
+				})
+
+				err = g.Wait()
+				if err != nil {
+					return cli.NewExitError(err.Error(), 1)
+				}
 				return nil
+
 			},
 		},
 	}
