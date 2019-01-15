@@ -93,31 +93,7 @@ func BuildApp() *cli.App {
 	}
 
 	app.Action = func(c *cli.Context) error {
-		logger := NewLogger(c.GlobalString("loglevel"))
-		nsqdOpts, err := buildNSQDOptions(c, logger)
-		if err != nil {
-			return cli.NewExitError(err.Error(), 1)
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		listenSignals(cancel)
-		g, lctx := errgroup.WithContext(ctx)
-		incoming := make(chan *Entry, 10000)
-		tcpAddrs := c.GlobalStringSlice("tcp")
-		udpAddrs := c.GlobalStringSlice("udp")
-
-		g.Go(func() error {
-			return NSQD(lctx, nsqdOpts, incoming, nil, logger)
-		})
-
-		g.Go(func() error {
-			return listen(lctx, tcpAddrs, udpAddrs, incoming, logger)
-		})
-
-		err = g.Wait()
-		if err != nil {
-			return cli.NewExitError(err.Error(), 1)
-		}
-		return nil
+		return action(c, nil)
 	}
 
 	app.Commands = []cli.Command{
@@ -133,40 +109,11 @@ func BuildApp() *cli.App {
 			Name:  "stdout",
 			Usage: "just write access logs to stdout",
 			Action: func(c *cli.Context) error {
-				logger := NewLogger(c.GlobalString("loglevel"))
-				nsqdOpts, err := buildNSQDOptions(c, logger)
-				if err != nil {
-					return cli.NewExitError(err.Error(), 1)
-				}
-				ctx, cancel := context.WithCancel(context.Background())
-				listenSignals(cancel)
-				g, lctx := errgroup.WithContext(ctx)
-				incoming := make(chan *Entry, 10000)
-				outcoming := make(chan *Entry)
-				tcpAddrs := c.GlobalStringSlice("tcp")
-				udpAddrs := c.GlobalStringSlice("udp")
-
-				g.Go(func() error {
-					return NSQD(lctx, nsqdOpts, incoming, outcoming, logger)
-				})
-
-				g.Go(func() error {
-					return listen(lctx, tcpAddrs, udpAddrs, incoming, logger)
-				})
-
-				g.Go(func() error {
-					for entry := range outcoming {
-						fmt.Println(entry)
-					}
+				handler := func(done <-chan struct{}, entry *Entry) error {
+					fmt.Println(entry.String())
 					return nil
-				})
-
-				err = g.Wait()
-				if err != nil {
-					return cli.NewExitError(err.Error(), 1)
 				}
-				return nil
-
+				return action(c, handler)
 			},
 		},
 	}
@@ -176,4 +123,32 @@ func BuildApp() *cli.App {
 
 func main() {
 	_ = BuildApp().Run(os.Args)
+}
+
+func action(c *cli.Context, h Handler) error {
+	logger := NewLogger(c.GlobalString("loglevel"))
+	nsqdOpts, err := buildNSQDOptions(c, logger)
+	if err != nil {
+		return cli.NewExitError(err.Error(), 1)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	listenSignals(cancel)
+	g, lctx := errgroup.WithContext(ctx)
+	incoming := make(chan *Entry, 10000)
+	tcpAddrs := c.GlobalStringSlice("tcp")
+	udpAddrs := c.GlobalStringSlice("udp")
+
+	g.Go(func() error {
+		return NSQD(lctx, nsqdOpts, incoming, h, logger)
+	})
+
+	g.Go(func() error {
+		return listen(lctx, tcpAddrs, udpAddrs, incoming, logger)
+	})
+
+	err = g.Wait()
+	if err != nil {
+		return cli.NewExitError(err.Error(), 1)
+	}
+	return nil
 }

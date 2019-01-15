@@ -8,7 +8,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, outcoming chan *Entry, logger Logger) error {
+func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, h Handler, logger Logger) error {
 	daemon := nsqd.New(opts)
 	logger.Info("Starting NSQD")
 	daemon.Main()
@@ -19,9 +19,9 @@ func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, outcomi
 		return pushEntries(lctx, opts.TCPAddress, incoming, logger)
 	})
 
-	if outcoming != nil {
+	if h != nil {
 		g.Go(func() error {
-			return pullEntries(lctx, opts.TCPAddress, outcoming, logger)
+			return pullEntries(lctx, opts.TCPAddress, h, logger)
 		})
 	}
 	err := g.Wait()
@@ -31,29 +31,25 @@ func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, outcomi
 	return err
 }
 
+type Handler func(<-chan struct{}, *Entry) error
+
 type handler struct {
-	entries chan *Entry
+	th Handler
 	logger  Logger
 	done    <-chan struct{}
 }
 
-func (h handler) HandleMessage(message *nsq.Message) error {
+func (h *handler) HandleMessage(message *nsq.Message) error {
 	var entry Entry
 	err := json.Unmarshal(message.Body, &entry)
 	if err != nil {
 		h.logger.Warn("Failed to unmarshal message from nsqd")
 		return nil
 	}
-	select {
-	case <-h.done:
-		return context.Canceled
-	case h.entries <- &entry:
-		return nil
-	}
+	return h.th(h.done, &entry)
 }
 
-func pullEntries(ctx context.Context, tcpAddress string, entries chan *Entry, logger Logger) error {
-	defer close(entries)
+func pullEntries(ctx context.Context, tcpAddress string, h Handler, logger Logger) error {
 	cfg := nsq.NewConfig()
 	cfg.ClientID = "reaper_puller"
 	c, err := nsq.NewConsumer("embedded", "reaper_puller", cfg)
@@ -61,8 +57,8 @@ func pullEntries(ctx context.Context, tcpAddress string, entries chan *Entry, lo
 		return err
 	}
 	c.SetLogger(logger, nsq.LogLevelInfo)
-	c.AddHandler(handler{
-		entries: entries,
+	c.AddHandler(&handler{
+		th: h,
 		logger:  logger,
 		done:    ctx.Done(),
 	})
