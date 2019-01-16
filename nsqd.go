@@ -4,16 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/nsqio/go-nsq"
-	"github.com/nsqio/nsq/nsqd"
-	"github.com/urfave/cli"
-	"golang.org/x/sync/errgroup"
 	"os"
 	"runtime"
 	"sync"
 	"time"
-)
 
+	nsq "github.com/nsqio/go-nsq"
+	"github.com/nsqio/nsq/nsqd"
+	"github.com/urfave/cli"
+	"golang.org/x/sync/errgroup"
+)
 
 func buildNSQDOptions(c *cli.Context, l Logger) (*nsqd.Options, error) {
 	opts := nsqd.NewOptions()
@@ -97,10 +97,12 @@ type handler struct {
 }
 
 func (h *handler) HandleMessage(message *nsq.Message) error {
+	message.DisableAutoResponse()
 	var entry Entry
 	err := json.Unmarshal(message.Body, &entry)
 	if err != nil {
 		h.logger.Warn("Failed to unmarshal message from nsqd", "error", err)
+		message.Finish()
 		return nil
 	}
 	err = h.th(h.done, &entry, func(err error) {
