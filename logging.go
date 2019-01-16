@@ -1,7 +1,10 @@
 package main
 
 import (
+	"fmt"
+	"github.com/Shopify/sarama"
 	"github.com/inconshreveable/log15"
+	"github.com/nsqio/nsq/nsqd"
 	"strings"
 )
 
@@ -9,13 +12,41 @@ type Logger struct {
 	log15.Logger
 }
 
-func (l Logger) Output(maxDepth int, s string) error {
+type adaptedNSQD struct {
+	Logger
+}
+
+type adaptedSarama struct {
+	Logger
+}
+
+func (l adaptedSarama) Print(v ...interface{}) {
+	l.Logger.Info("[kafka] " + fmt.Sprint(v...))
+}
+
+func (l adaptedSarama) Printf(format string, v ...interface{}) {
+	l.Logger.Info("[kafka] " + fmt.Sprintf(format, v...))
+}
+
+func (l adaptedSarama) Println(v ...interface{}) {
+	l.Logger.Info("[kafka] " + fmt.Sprint(v...))
+}
+
+func AdaptLoggerNSQD(l Logger) nsqd.Logger {
+	return adaptedNSQD{Logger: l}
+}
+
+func AdaptLoggerSarama(l Logger) sarama.StdLogger {
+	return adaptedSarama{Logger: l}
+}
+
+func (l adaptedNSQD) Output(maxDepth int, s string) error {
 	if len(s) < 5 {
 		l.Logger.Info(s)
 		return nil
 	}
 	prefix := s[:4]
-	msg := strings.TrimSpace(s[4:])
+	msg := "[nsq] " + strings.TrimSpace(s[4:])
 	switch prefix {
 	case "INF ":
 		l.Logger.Info(msg)
@@ -28,7 +59,7 @@ func (l Logger) Output(maxDepth int, s string) error {
 		if len(parts) < 2 {
 			l.Logger.Info(s)
 		} else {
-			msg := strings.TrimSpace(parts[1])
+			msg := "[nsqd] " + strings.TrimSpace(parts[1])
 			switch strings.TrimSpace(parts[0]) {
 			case "DEBUG":
 				l.Logger.Debug(msg)

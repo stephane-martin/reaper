@@ -9,7 +9,6 @@ import (
 	"github.com/Shopify/sarama"
 	"github.com/go-redis/redis"
 	"github.com/nsqio/go-nsq"
-	"github.com/nsqio/nsq/nsqd"
 	"github.com/urfave/cli"
 	"golang.org/x/sync/errgroup"
 	"io"
@@ -22,30 +21,6 @@ import (
 )
 
 var Version string
-
-func buildNSQDOptions(c *cli.Context, l Logger) (*nsqd.Options, error) {
-	opts := nsqd.NewOptions()
-	opts.Logger = l
-	opts.DataPath = c.GlobalString("embedded-nsqd-data-path")
-	opts.TCPAddress = c.GlobalString("embedded-nsqd-tcp-address")
-	opts.HTTPAddress = c.GlobalString("embedded-nsqd-http-address")
-	opts.SnappyEnabled = true
-	opts.DeflateEnabled = true
-
-	i, err := os.Stat(opts.DataPath)
-	if err != nil {
-		return nil, err
-	}
-	if !i.IsDir() {
-		return nil, errors.New("data path is not a directory")
-	}
-	f, err := os.Open(opts.DataPath)
-	if err != nil {
-		return nil, err
-	}
-	_ = f.Close()
-	return opts, nil
-}
 
 func listenSignals(cancel context.CancelFunc) {
 	sigchan := make(chan os.Signal, 1)
@@ -236,6 +211,8 @@ func BuildApp() *cli.App {
 			},
 			Action: func(c *cli.Context) error {
 				logger := NewLogger(c.GlobalString("loglevel"))
+				sarama.Logger = AdaptLoggerSarama(logger)
+
 				ctx, cancel := context.WithCancel(context.Background())
 				listenSignals(cancel)
 				g, lctx := errgroup.WithContext(ctx)
@@ -249,6 +226,7 @@ func BuildApp() *cli.App {
 				config.Producer.Retry.Max = 6
 				config.ClientID = "reaper_to_kafka"
 				config.Version = sarama.V1_0_0_0
+
 
 				brokers := c.StringSlice("broker")
 				if len(brokers) == 0 {
@@ -374,7 +352,7 @@ func BuildApp() *cli.App {
 						}
 					}
 				})
-				p.SetLogger(logger, nsq.LogLevelInfo)
+				p.SetLogger(AdaptLoggerNSQD(logger), nsq.LogLevelInfo)
 				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
 					b, err := json.Marshal(entry)
 					if err != nil {

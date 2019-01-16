@@ -3,13 +3,41 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/nsqio/go-nsq"
 	"github.com/nsqio/nsq/nsqd"
+	"github.com/urfave/cli"
 	"golang.org/x/sync/errgroup"
+	"os"
 	"runtime"
 	"sync"
 	"time"
 )
+
+
+func buildNSQDOptions(c *cli.Context, l Logger) (*nsqd.Options, error) {
+	opts := nsqd.NewOptions()
+	opts.Logger = AdaptLoggerNSQD(l)
+	opts.DataPath = c.GlobalString("embedded-nsqd-data-path")
+	opts.TCPAddress = c.GlobalString("embedded-nsqd-tcp-address")
+	opts.HTTPAddress = c.GlobalString("embedded-nsqd-http-address")
+	opts.SnappyEnabled = true
+	opts.DeflateEnabled = true
+
+	i, err := os.Stat(opts.DataPath)
+	if err != nil {
+		return nil, err
+	}
+	if !i.IsDir() {
+		return nil, errors.New("data path is not a directory")
+	}
+	f, err := os.Open(opts.DataPath)
+	if err != nil {
+		return nil, err
+	}
+	_ = f.Close()
+	return opts, nil
+}
 
 func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, h Handler, reconnect func() error, logger Logger) error {
 	daemon := nsqd.New(opts)
@@ -113,7 +141,7 @@ func pullEntries(ctx context.Context, tcpAddress string, h Handler, logger Logge
 	if err != nil {
 		return err
 	}
-	c.SetLogger(logger, nsq.LogLevelInfo)
+	c.SetLogger(AdaptLoggerNSQD(logger), nsq.LogLevelInfo)
 	errs := make(chan error)
 
 	c.AddConcurrentHandlers(&handler{
@@ -150,7 +178,7 @@ func pushEntries(ctx context.Context, tcpAddress string, entries chan *Entry, lo
 	if err != nil {
 		return err
 	}
-	p.SetLogger(logger, nsq.LogLevelInfo)
+	p.SetLogger(AdaptLoggerNSQD(logger), nsq.LogLevelInfo)
 	logger.Info("Ping embedded NSQD")
 	err = p.Ping()
 	if err != nil {
