@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 )
@@ -22,4 +23,13 @@ func (e *Entry) String() string {
 		b.WriteString(`" `)
 	}
 	return b.String()
+}
+
+
+func (e *Entry) JSON() []byte {
+	b, err := json.Marshal(e)
+	if err != nil {
+		return nil
+	}
+	return b
 }
