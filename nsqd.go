@@ -58,7 +58,7 @@ func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, h Handl
 	return err
 }
 
-type Handler func(<-chan struct{}, *Entry) error
+type Handler func(<-chan struct{}, *Entry, func(error)) error
 
 type handler struct {
 	th     Handler
@@ -72,13 +72,29 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 	var entry Entry
 	err := json.Unmarshal(message.Body, &entry)
 	if err != nil {
-		h.logger.Warn("Failed to unmarshal message from nsqd")
+		h.logger.Warn("Failed to unmarshal message from nsqd", "error", err)
 		return nil
 	}
-	err = h.th(h.done, &entry)
+	err = h.th(h.done, &entry, func(err error) {
+		if err == nil {
+			message.Finish()
+		} else {
+			message.Requeue(-1)
+			h.once.Do(func() {
+				h.logger.Warn("Failed to handle message (callback)", "error", err)
+				select {
+				case h.errs <- err:
+					close(h.errs)
+				case <-h.done:
+					close(h.errs)
+				}
+			})
+		}
+	})
 	if err != nil {
+		message.Requeue(-1)
 		h.once.Do(func() {
-			h.logger.Warn("Failed to handle message", "error", err)
+			h.logger.Warn("Failed to handle message (direct)", "error", err)
 			select {
 			case h.errs <- err:
 				close(h.errs)
