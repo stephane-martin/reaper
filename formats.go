@@ -6,6 +6,7 @@ import (
 	"github.com/urfave/cli"
 	"strconv"
 	"strings"
+	"text/scanner"
 )
 
 type Format int
@@ -55,48 +56,89 @@ func ParseContent(f Format, content string, e *Entry, logger Logger) error {
 }
 
 func parseKV(content string, e *Entry, logger Logger) error {
-	fields := strings.Fields(content)
-	if len(fields) == 0 {
-		return nil
-	}
 
-	var key string
-	var value string
-	var err error
+	var s scanner.Scanner
+	var t, key, value string
+	var expectKey, expectValue, expectEqual bool
 	var fl float64
 	var in int64
+	var err error
 
-	for _, field := range fields {
-		fieldParts := strings.SplitN(field, "=", 2)
-		if len(fieldParts) == 2 {
-			key = fieldParts[0]
-			value = fieldParts[1]
-			if len(value) > 0 {
-				if value[0] == '"' {
-					v, err := strconv.Unquote(value)
-					if err == nil {
-						e.Set(key, v)
+	expectKey = true
+	s.Init(strings.NewReader(content))
+	s.Error = func(*scanner.Scanner, string) {}
+
+	L:
+	for tok := s.Scan(); tok != scanner.EOF; tok = s.Scan() {
+		t = s.TokenText()
+		if expectKey {
+			if len(t) == 0 {
+				continue L
+			}
+			key = t
+			expectKey = false
+			expectEqual = true
+			continue L
+		}
+		if expectEqual {
+			if t != "=" {
+				expectKey = true
+				expectEqual = false
+				key = ""
+				continue L
+			}
+			expectEqual = false
+			expectValue = true
+			continue L
+		}
+		if expectValue {
+			value = t
+			expectValue = false
+			expectKey = true
+			if value == "-" || value == "_" || value == "" {
+				key = ""
+				value = ""
+				continue L
+			}
+			if value == `"_"` || value == `"-"` {
+				e.Set(key, "")
+				key = ""
+				value = ""
+				continue L
+			}
+			if value[0] == '"' {
+				value, err = strconv.Unquote(value)
+				if err == nil {
+					if value == "-" || value == "_" {
+						value = ""
 					}
-				} else if value != "-" {
-					fl, err = strconv.ParseFloat(value, 64)
-					if err == nil {
-						e.Set(key, fl)
-					} else {
-						in, err = strconv.ParseInt(value, 10, 64)
-						if err == nil {
-							e.Set(key, in)
-						} else {
-							logger.Info("Failed to parse key/value", "key", key, "value", value)
-						}
-					}
+					e.Set(key, value)
+				}
+				key = ""
+				value = ""
+				continue L
+			}
+			fl, err = strconv.ParseFloat(value, 64)
+			if err == nil {
+				e.Set(key, fl)
+			} else {
+				in, err = strconv.ParseInt(value, 10, 64)
+				if err == nil {
+					e.Set(key, in)
 				}
 			}
+			key = ""
+			value = ""
 		}
 	}
+
 	return nil
 }
 
 func parseNginxCombined(content string, e *Entry, logger Logger) error {
+	// log_format combined '$remote_addr - $remote_user [$time_local] '
+	//                     '"$request" $status $body_bytes_sent '
+	//                     '"$http_referer" "$http_user_agent"';
 	return nil
 }
 

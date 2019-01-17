@@ -28,7 +28,7 @@ func (e Entry) UID() string {
 
 func (e *Entry) Set(key string, value interface{}) {
 	if value != nil {
-		if v, ok := value.(string); ok && v == "-" {
+		if v, ok := value.(string); ok && (v == "-" || v == "_") {
 			(*e)[key] = ""
 		} else {
 			(*e)[key] = value
