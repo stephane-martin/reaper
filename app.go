@@ -65,6 +65,11 @@ func BuildApp() *cli.App {
 			Usage:  "tcp address to listen on (eg. 127.0.0.1:1514)",
 			EnvVar: "REAPER_UDP_ADDRESS",
 		},
+		cli.BoolFlag{
+			Name: "stdin",
+			Usage: "receive logs on stdin",
+			EnvVar: "REAPER_STDIN",
+		},
 		cli.StringFlag{
 			Name:   "embedded-nsqd-tcp-address",
 			Usage:  "TCP listen address for the embedded nsqd",
@@ -408,17 +413,18 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	incoming := make(chan Entry, 10000)
 	tcpAddrs := c.GlobalStringSlice("tcp")
 	udpAddrs := c.GlobalStringSlice("udp")
+	stdin := c.GlobalBool("stdin")
 
 	g.Go(func() error {
 		return NSQD(ctx, nsqdOpts, incoming, h, reconnect, logger)
 	})
 
 	g.Go(func() error {
-		return listen(ctx, tcpAddrs, udpAddrs, format, incoming, logger)
+		return listen(ctx, tcpAddrs, udpAddrs, stdin, format, incoming, logger)
 	})
 
 	err = g.Wait()
-	if err != nil {
+	if err != nil && err != context.Canceled {
 		return cli.NewExitError(err.Error(), 1)
 	}
 	return nil

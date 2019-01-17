@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/mcuadros/go-syslog.v2/format"
 	"net"
+	"os"
 	"time"
 )
 
-func listen(ctx context.Context, tcp []string, udp []string, f Format, entries chan Entry, l Logger) error {
+func listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Format, entries chan Entry, l Logger) error {
+	defer close(entries)
 	g, lctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		return listenTCP(lctx, tcp, f, entries, l)
@@ -16,6 +19,27 @@ func listen(ctx context.Context, tcp []string, udp []string, f Format, entries c
 	g.Go(func() error {
 		return listenUDP(lctx, udp, f, entries, l)
 	})
+	if stdin {
+		g.Go(func() error {
+			s := WithContext(lctx, bufio.NewScanner(os.Stdin))
+			L:
+			for s.Scan() {
+				e := NewEntry()
+				err := ParseContent(f, s.Text(), &e, l)
+				if err != nil {
+					l.Warn("Failed to parse access log", "error", err)
+					continue L
+				}
+				select {
+				case <-lctx.Done():
+					return ctx.Err()
+				case entries <- e:
+				}
+			}
+			return s.Err()
+		})
+
+	}
 	return g.Wait()
 }
 

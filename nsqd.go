@@ -25,7 +25,16 @@ func buildNSQDOptions(c *cli.Context, l Logger) (*nsqd.Options, error) {
 	opts.DeflateEnabled = true
 
 	i, err := os.Stat(opts.DataPath)
-	if err != nil {
+	if err != nil && os.IsNotExist(err) {
+		err = os.MkdirAll(opts.DataPath, 0755)
+		if err != nil {
+			return nil, err
+		}
+		i, err = os.Stat(opts.DataPath)
+		if err != nil {
+			return nil, err
+		}
+	} else if err != nil {
 		return nil, err
 	}
 	if !i.IsDir() {

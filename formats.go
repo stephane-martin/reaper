@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"text/scanner"
+	"time"
+	"unicode"
 )
 
 type Format int
@@ -14,8 +16,7 @@ type Format int
 const (
 	JSON Format = iota
 	KeyValues
-	NginxCombined
-	ApacheCombined
+	Combined
 	ApacheCommon
 )
 
@@ -26,10 +27,8 @@ func GetFormat(c *cli.Context) (Format, error) {
 		return JSON, nil
 	case "kv":
 		return KeyValues, nil
-	case "nginx_combined":
-		return NginxCombined, nil
-	case "apache_combined":
-		return ApacheCombined, nil
+	case "combined":
+		return Combined, nil
 	case "apache_common":
 		return ApacheCommon, nil
 	default:
@@ -39,15 +38,14 @@ func GetFormat(c *cli.Context) (Format, error) {
 
 
 func ParseContent(f Format, content string, e *Entry, logger Logger) error {
+	content = strings.TrimSpace(content)
 	switch f {
 	case JSON:
 		return parseJSON(content, e, logger)
 	case KeyValues:
 		return parseKV(content, e, logger)
-	case NginxCombined:
-		return parseNginxCombined(content, e, logger)
-	case ApacheCombined:
-		return parseApacheCombined(content, e, logger)
+	case Combined:
+		return parseCombined(content, e, logger)
 	case ApacheCommon:
 		return parseApacheCommon(content, e, logger)
 	default:
@@ -66,7 +64,9 @@ func parseKV(content string, e *Entry, logger Logger) error {
 
 	expectKey = true
 	s.Init(strings.NewReader(content))
-	s.Error = func(*scanner.Scanner, string) {}
+	s.Error = func(_ *scanner.Scanner, msg string) {
+		logger.Debug("error in text scanner", "msg", msg)
+	}
 
 	L:
 	for tok := s.Scan(); tok != scanner.EOF; tok = s.Scan() {
@@ -125,28 +125,73 @@ func parseKV(content string, e *Entry, logger Logger) error {
 				in, err = strconv.ParseInt(value, 10, 64)
 				if err == nil {
 					e.Set(key, in)
+				} else {
+					e.Set(key, value)
 				}
 			}
 			key = ""
 			value = ""
 		}
 	}
-
 	return nil
 }
 
-func parseNginxCombined(content string, e *Entry, logger Logger) error {
+func parseCombined(content string, e *Entry, logger Logger) error {
 	// log_format combined '$remote_addr - $remote_user [$time_local] '
 	//                     '"$request" $status $body_bytes_sent '
 	//                     '"$http_referer" "$http_user_agent"';
-	return nil
-}
-
-func parseApacheCombined(content string, e *Entry, logger Logger) error {
+	tokens := make([]string, 0, 12)
+	var s scanner.Scanner
+	s.Error = func(_ *scanner.Scanner, msg string) {
+		logger.Debug("error in text scanner", "msg", msg)
+	}
+	s.IsIdentRune = func(ch rune, i int) bool {
+		if ch == '.' || ch == '/' || ch == ':' || ch == '+' || ch == '-' {
+			return true
+		}
+		if unicode.IsLetter(ch) {
+			return true
+		}
+		if unicode.IsDigit(ch) {
+			return true
+		}
+		return false
+	}
+	s.Init(strings.NewReader(content))
+	for tok := s.Scan(); tok != scanner.EOF; tok = s.Scan() {
+		tokens = append(tokens, s.TokenText())
+	}
+	e.Set("remote_addr", tokens[0])
+	e.Set("remote_user", tokens[2])
+	t, err := time.Parse("02/Jan/2006:15:04:05 -0700", tokens[4] + " " + tokens[5])
+	if err == nil {
+		e.Set("time_local", t.Format(time.RFC3339))
+	}
+	req, err := strconv.Unquote(tokens[7])
+	if err == nil {
+		e.Set("request", req)
+	}
+	status, err := strconv.ParseInt(tokens[8], 10, 64)
+	if err == nil {
+		e.Set("status", status)
+	}
+	bytesBodySent, err := strconv.ParseInt(tokens[9], 10, 64)
+	if err == nil {
+		e.Set("bytes_body_sent", bytesBodySent)
+	}
+	referer, err := strconv.Unquote(tokens[10])
+	if err == nil {
+		e.Set("referer", referer)
+	}
+	userAgent, err := strconv.Unquote(tokens[11])
+	if err == nil {
+		e.Set("user_agent", userAgent)
+	}
 	return nil
 }
 
 func parseApacheCommon(content string, e *Entry, logger Logger) error {
+	// LogFormat "%h %l %u %t \"%r\" %>s %b" common
 	return nil
 }
 
