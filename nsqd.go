@@ -96,6 +96,18 @@ type handler struct {
 	once   sync.Once
 }
 
+func (h *handler) markError(err error) {
+	h.once.Do(func() {
+		h.logger.Warn("Failed to handle message", "error", err)
+		select {
+		case h.errs <- err:
+			close(h.errs)
+		case <-h.done:
+			close(h.errs)
+		}
+	})
+}
+
 func (h *handler) HandleMessage(message *nsq.Message) error {
 	message.DisableAutoResponse()
 	var entry Entry
@@ -105,33 +117,17 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 		message.Finish()
 		return nil
 	}
-	err = h.th(h.done, &entry, func(err error) {
-		if err == nil {
+	err = h.th(h.done, &entry, func(e error) {
+		if e == nil {
 			message.Finish()
 		} else {
 			message.Requeue(-1)
-			h.once.Do(func() {
-				h.logger.Warn("Failed to handle message (callback)", "error", err)
-				select {
-				case h.errs <- err:
-					close(h.errs)
-				case <-h.done:
-					close(h.errs)
-				}
-			})
+			h.markError(e)
 		}
 	})
 	if err != nil {
 		message.Requeue(-1)
-		h.once.Do(func() {
-			h.logger.Warn("Failed to handle message (direct)", "error", err)
-			select {
-			case h.errs <- err:
-				close(h.errs)
-			case <-h.done:
-				close(h.errs)
-			}
-		})
+		h.markError(err)
 	}
 	return err
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -98,15 +99,19 @@ func BuildApp() *cli.App {
 			Name:  "stdout",
 			Usage: "write access logs to stdout",
 			Action: func(c *cli.Context) error {
-				return actionWriter(c, os.Stdout)
+				return actionWriter(c, os.Stdout, false, 0)
 			},
 		},
 		{
 			Name:  "stderr",
 			Usage: "write access logs to stdout",
 			Action: func(c *cli.Context) error {
-				return actionWriter(c, os.Stderr)
+				return actionWriter(c, os.Stderr, false, 0)
 			},
+		},
+		{
+			Name: "rabbitmq",
+
 		},
 		{
 			Name:  "file",
@@ -118,6 +123,17 @@ func BuildApp() *cli.App {
 					Value:  "/tmp/access.log",
 					EnvVar: "REAPER_OUT_FILE",
 				},
+				cli.BoolFlag{
+					Name: "gzip",
+					Usage: "use gzip compression",
+					EnvVar: "REAPER_OUT_FILE_GZIP",
+				},
+				cli.IntFlag{
+					Name: "gziplevel",
+					Usage: "gzip level",
+					Value: 6,
+					EnvVar: "REAPER_OUT_FILE_GZIP_LEVEL",
+				},
 			},
 			Action: func(c *cli.Context) error {
 				f, err := os.OpenFile(c.String("filename"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -126,7 +142,7 @@ func BuildApp() *cli.App {
 				}
 				//noinspection GoUnhandledErrorResult
 				defer f.Close()
-				return actionWriter(c, f)
+				return actionWriter(c, f, c.Bool("gzip"), c.Int("gziplevel"))
 			},
 		},
 		{
@@ -226,7 +242,6 @@ func BuildApp() *cli.App {
 				config.Producer.Retry.Max = 6
 				config.ClientID = "reaper_to_kafka"
 				config.Version = sarama.V1_0_0_0
-
 
 				brokers := c.StringSlice("broker")
 				if len(brokers) == 0 {
@@ -403,28 +418,43 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	return nil
 }
 
-func actionWriter(c *cli.Context, w io.Writer) error {
-	// TODO: gzip
+func actionWriter(c *cli.Context, w io.Writer, gzipEnabled bool, gzipLevel int) error {
 	logger := NewLogger(c.GlobalString("loglevel"))
 	ctx, cancel := context.WithCancel(context.Background())
 	listenSignals(cancel)
 	g, lctx := errgroup.WithContext(ctx)
 	var l sync.Mutex
+
 	bufw := bufio.NewWriter(w)
 	//noinspection GoUnhandledErrorResult
 	defer bufw.Flush()
+	var writer io.Writer
+
+	if gzipEnabled {
+		gzipw, err := gzip.NewWriterLevel(bufw, gzipLevel)
+		if err != nil {
+			return err
+		}
+		//noinspection GoUnhandledErrorResult
+		defer gzipw.Close()
+		writer = gzipw
+	} else {
+		writer = bufw
+	}
+
 	handler := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
+		var err error
 		b := entry.JSON()
 		if b != nil {
+			b = append(b, '\n')
 			l.Lock()
-			//noinspection GoUnhandledErrorResult
-			bufw.Write(b)
-			//noinspection GoUnhandledErrorResult
-			bufw.WriteByte('\n')
+			_, err = writer.Write(b)
 			l.Unlock()
 		}
-		ack(nil)
-		return nil
+		if err == nil {
+			ack(nil)
+		}
+		return err
 	}
 	return action(lctx, g, c, handler, nil, logger)
 }
