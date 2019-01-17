@@ -39,7 +39,7 @@ func buildNSQDOptions(c *cli.Context, l Logger) (*nsqd.Options, error) {
 	return opts, nil
 }
 
-func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, h Handler, reconnect func() error, logger Logger) error {
+func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan Entry, h Handler, reconnect func() error, logger Logger) error {
 	daemon := nsqd.New(opts)
 	logger.Info("Starting NSQD")
 	daemon.Main()
@@ -169,7 +169,7 @@ func pullEntries(ctx context.Context, tcpAddress string, h Handler, logger Logge
 	}
 }
 
-func pushEntries(ctx context.Context, tcpAddress string, entries chan *Entry, logger Logger) error {
+func pushEntries(ctx context.Context, tcpAddress string, entries chan Entry, logger Logger) error {
 	cfg := nsq.NewConfig()
 	cfg.ClientID = "reaper_producer"
 	p, err := nsq.NewProducer(tcpAddress, cfg)
@@ -218,10 +218,8 @@ func pushEntries(ctx context.Context, tcpAddress string, entries chan *Entry, lo
 					entries = nil
 					continue L
 				}
-				b, err := json.Marshal(entry)
-				if err != nil {
-					logger.Warn("Failed to marshal access log entry", "error", err)
-				} else {
+				b := entry.JSON()
+				if b != nil {
 					err := p.PublishAsync("embedded", b, doneChan)
 					if err != nil {
 						return err

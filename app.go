@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"compress/gzip"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/Shopify/sarama"
@@ -83,6 +82,12 @@ func BuildApp() *cli.App {
 			Usage:  "data path for the embedded nsqd",
 			EnvVar: "REAPER_EMB_NSQD_DATA_PATH",
 			Value:  "/tmp/reaper/nsqd",
+		},
+		cli.StringFlag{
+			Name: "format",
+			Usage: "access log format [json, kv, apache_combined, apache_common, nginx_common]",
+			Value: "kv",
+			EnvVar: "REAPER_ACCESS_LOG_FORMAT",
 		},
 	}
 
@@ -193,13 +198,12 @@ func BuildApp() *cli.App {
 				reconnect := func() error { return client.Ping().Err() }
 
 				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
-					b, err := json.Marshal(entry)
-					if err != nil {
-						logger.Warn("Failed to marshal message", "error", err, "uid", entry.UID)
+					b := entry.JSON()
+					if b == nil {
 						ack(nil)
 						return nil
 					}
-					err = client.RPush(listname, b).Err()
+					err := client.RPush(listname, b).Err()
 					if err == nil {
 						ack(nil)
 					}
@@ -297,9 +301,8 @@ func BuildApp() *cli.App {
 					if p == nil {
 						return errors.New("not connected to kafka")
 					}
-					b, err := json.Marshal(entry)
-					if err != nil {
-						logger.Warn("Failed to marshal message", "error", err, "uid", entry.UID)
+					b := entry.JSON()
+					if b == nil {
 						ack(nil)
 						return nil
 					}
@@ -369,9 +372,8 @@ func BuildApp() *cli.App {
 				})
 				p.SetLogger(AdaptLoggerNSQD(logger), nsq.LogLevelInfo)
 				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
-					b, err := json.Marshal(entry)
-					if err != nil {
-						logger.Warn("Failed to marshal message", "error", err, "uid", entry.UID)
+					b := entry.JSON()
+					if b == nil {
 						ack(nil)
 						return nil
 					}
@@ -398,8 +400,12 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	if err != nil {
 		return cli.NewExitError(err.Error(), 1)
 	}
+	format, err := GetFormat(c)
+	if err != nil {
+		return cli.NewExitError(err.Error(), 1)
+	}
 
-	incoming := make(chan *Entry, 10000)
+	incoming := make(chan Entry, 10000)
 	tcpAddrs := c.GlobalStringSlice("tcp")
 	udpAddrs := c.GlobalStringSlice("udp")
 
@@ -408,7 +414,7 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	})
 
 	g.Go(func() error {
-		return listen(ctx, tcpAddrs, udpAddrs, incoming, logger)
+		return listen(ctx, tcpAddrs, udpAddrs, format, incoming, logger)
 	})
 
 	err = g.Wait()
@@ -443,16 +449,18 @@ func actionWriter(c *cli.Context, w io.Writer, gzipEnabled bool, gzipLevel int) 
 	}
 
 	handler := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
-		var err error
 		b := entry.JSON()
-		if b != nil {
-			b = append(b, '\n')
-			l.Lock()
-			_, err = writer.Write(b)
-			l.Unlock()
+		if b == nil {
+			ack(nil)
+			return nil
 		}
+		b = append(b, '\n')
+		l.Lock()
+		_, err := writer.Write(b)
+		l.Unlock()
 		if err == nil {
 			ack(nil)
+			return nil
 		}
 		return err
 	}
