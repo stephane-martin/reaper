@@ -26,6 +26,15 @@ func buildNSQDOptions(c *cli.Context, l Logger) (*nsqd.Options, error) {
 	opts.BroadcastAddress = listenAddr
 	opts.TCPAddress = net.JoinHostPort(listenAddr, fmt.Sprintf("%d", tcpPort))
 	opts.HTTPAddress = net.JoinHostPort(listenAddr, fmt.Sprintf("%d", httpPort))
+	opts.MaxDeflateLevel = 9
+	opts.MaxBodySize = 5242880
+	opts.MaxMsgSize = 1048576
+	opts.MaxMsgTimeout = 15 * time.Minute
+	opts.MsgTimeout = time.Minute
+	opts.MaxRdyCount = 2500
+	opts.MemQueueSize = 10000
+	opts.StatsdMemStats = false
+	opts.StatsdPrefix = "nsqd.embedded.%s"
 	l.Info("Starting embedded nsqd",
 		"addr", listenAddr,
 		"tcp", opts.TCPAddress,
@@ -155,6 +164,12 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 func pullEntries(ctx context.Context, tcpAddress string, h Handler, logger Logger) error {
 	cfg := nsq.NewConfig()
 	cfg.ClientID = "reaper_puller"
+	cfg.MaxInFlight = 1000
+	cfg.MaxAttempts = 0
+	cfg.Snappy = true
+	cfg.MaxRequeueDelay = 15 * time.Minute
+	cfg.DefaultRequeueDelay = 90 * time.Second
+
 	c, err := nsq.NewConsumer("embedded", "reaper_puller", cfg)
 	if err != nil {
 		return err
@@ -192,6 +207,7 @@ func pullEntries(ctx context.Context, tcpAddress string, h Handler, logger Logge
 func pushEntries(ctx context.Context, tcpAddress string, entries chan Entry, logger Logger) error {
 	cfg := nsq.NewConfig()
 	cfg.ClientID = "reaper_producer"
+	cfg.Snappy = true
 	p, err := nsq.NewProducer(tcpAddress, cfg)
 	if err != nil {
 		return err
