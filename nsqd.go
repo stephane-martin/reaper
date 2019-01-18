@@ -4,23 +4,34 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
 	"os"
-	"runtime"
 	"sync"
 	"time"
 
-	nsq "github.com/nsqio/go-nsq"
+	"github.com/nsqio/go-nsq"
 	"github.com/nsqio/nsq/nsqd"
 	"github.com/urfave/cli"
 	"golang.org/x/sync/errgroup"
 )
 
 func buildNSQDOptions(c *cli.Context, l Logger) (*nsqd.Options, error) {
+	listenAddr := c.GlobalString("embedded-nsqd-address")
+	tcpPort := c.GlobalInt("embedded-nsqd-tcp-port")
+	httpPort := c.GlobalInt("embedded-nsqd-http-port")
 	opts := nsqd.NewOptions()
 	opts.Logger = AdaptLoggerNSQD(l)
 	opts.DataPath = c.GlobalString("embedded-nsqd-data-path")
-	opts.TCPAddress = c.GlobalString("embedded-nsqd-tcp-address")
-	opts.HTTPAddress = c.GlobalString("embedded-nsqd-http-address")
+	opts.BroadcastAddress = listenAddr
+	opts.TCPAddress = net.JoinHostPort(listenAddr, fmt.Sprintf("%d", tcpPort))
+	opts.HTTPAddress = net.JoinHostPort(listenAddr, fmt.Sprintf("%d", httpPort))
+	l.Info("Starting embedded nsqd",
+		"addr", listenAddr,
+		"tcp", opts.TCPAddress,
+		"http", opts.HTTPAddress,
+		"datapath", opts.DataPath,
+	)
 	opts.SnappyEnabled = true
 	opts.DeflateEnabled = true
 
@@ -151,12 +162,12 @@ func pullEntries(ctx context.Context, tcpAddress string, h Handler, logger Logge
 	c.SetLogger(AdaptLoggerNSQD(logger), nsq.LogLevelInfo)
 	errs := make(chan error)
 
-	c.AddConcurrentHandlers(&handler{
+	c.AddHandler(&handler{
 		th:     h,
 		logger: logger,
 		done:   ctx.Done(),
 		errs:   errs,
-	}, runtime.NumCPU())
+	})
 
 	err = c.ConnectToNSQD(tcpAddress)
 	if err != nil {

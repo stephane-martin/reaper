@@ -71,16 +71,22 @@ func BuildApp() *cli.App {
 			EnvVar: "REAPER_STDIN",
 		},
 		cli.StringFlag{
-			Name:   "embedded-nsqd-tcp-address",
-			Usage:  "TCP listen address for the embedded nsqd",
-			EnvVar: "REAPER_EMB_NSQD_TCP_ADDR",
-			Value:  "127.0.0.1:4150",
+			Name:   "embedded-nsqd-address",
+			Usage:  "bind address for the embedded nsqd",
+			EnvVar: "REAPER_EMB_NSQD_ADDR",
+			Value:  "127.0.0.1",
 		},
-		cli.StringFlag{
-			Name:   "embedded-nsqd-http-address",
-			Usage:  "HTTP listen address for the embedded nsqd",
-			EnvVar: "REAPER_EMB_NSQD_HTTP_ADDR",
-			Value:  "127.0.0.1:4151",
+		cli.IntFlag{
+			Name:   "embedded-nsqd-tcp-port",
+			Usage:  "TCP port for the embedded nsqd",
+			EnvVar: "REAPER_EMB_NSQD_TCP_PORT",
+			Value:  4150,
+		},
+		cli.IntFlag{
+			Name:   "embedded-nsqd-http-port",
+			Usage:  "HTTP port for the embedded nsqd",
+			EnvVar: "REAPER_EMB_NSQD_HTTP_PORT",
+			Value:  4151,
 		},
 		cli.StringFlag{
 			Name:   "embedded-nsqd-data-path",
