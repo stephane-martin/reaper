@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/Shopify/sarama"
 	"github.com/go-redis/redis"
 	"github.com/nsqio/go-nsq"
+	"github.com/olivere/elastic"
+	"github.com/orcaman/concurrent-map"
 	"github.com/urfave/cli"
 	"golang.org/x/sync/errgroup"
 	"io"
@@ -66,8 +69,8 @@ func BuildApp() *cli.App {
 			EnvVar: "REAPER_UDP_ADDRESS",
 		},
 		cli.BoolFlag{
-			Name: "stdin",
-			Usage: "receive logs on stdin",
+			Name:   "stdin",
+			Usage:  "receive logs on stdin",
 			EnvVar: "REAPER_STDIN",
 		},
 		cli.StringFlag{
@@ -95,9 +98,9 @@ func BuildApp() *cli.App {
 			Value:  "/tmp/reaper/nsqd",
 		},
 		cli.StringFlag{
-			Name: "format",
-			Usage: "access log format [json, kv, apache_combined, apache_common, nginx_common]",
-			Value: "kv",
+			Name:   "format",
+			Usage:  "access log format [json, kv, apache_combined, apache_common, nginx_common]",
+			Value:  "kv",
 			EnvVar: "REAPER_ACCESS_LOG_FORMAT",
 		},
 	}
@@ -127,7 +130,162 @@ func BuildApp() *cli.App {
 		},
 		{
 			Name: "rabbitmq",
+		},
+		{
+			Name:  "elasticsearch",
+			Usage: "write access logs to elaticsearch",
+			Flags: []cli.Flag{
+				cli.StringSliceFlag{
+					Name:   "url",
+					Usage:  "Elasticsearch URL (eg. http://127.0.0.1:9200, can be specified multiple times)",
+					EnvVar: "REAPER_ELASTICSEARCH_URL",
+				},
+				cli.StringFlag{
+					Name:   "index",
+					Usage:  "Elasticsearch index to write access logs to",
+					Value:  "reaper",
+					EnvVar: "REAPER_ELASTICSEARCH_INDEX",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				logger := NewLogger(c.GlobalString("loglevel"))
+				ctx, cancel := context.WithCancel(context.Background())
+				listenSignals(cancel)
+				g, lctx := errgroup.WithContext(ctx)
 
+				urls := c.StringSlice("url")
+				if len(urls) == 0 {
+					return cli.NewExitError("No Elasticsearch URL provided", 1)
+				}
+				indexName := c.String("index")
+				if indexName == "" {
+					return cli.NewExitError("Elasticsearch index name not provided", 1)
+				}
+
+				esClient, err := elastic.NewClient(
+					elastic.SetURL(urls...),
+					elastic.SetSniff(false),
+					elastic.SetHealthcheck(false),
+					elastic.SetInfoLog(AdaptInfoLoggerElasticsearch(logger)),
+					elastic.SetErrorLog(AdaptErrorLoggerElasticsearch(logger)),
+				)
+				if err != nil {
+					return cli.NewExitError(err.Error(), 1)
+				}
+				defer esClient.Stop()
+
+				callbacks := cmap.New()
+				doAck := func(uid string, err error) {
+					if v, ok := callbacks.Pop(uid); ok {
+						v.(func(error))(err)
+					}
+				}
+
+				var processorRef atomic.Value
+
+				getProcessor := func() *elastic.BulkProcessor {
+					p := processorRef.Load()
+					if p == nil {
+						return nil
+					}
+					return p.(*elastic.BulkProcessor)
+				}
+
+				closeProcessor := func() {
+					p := getProcessor()
+					if p != nil {
+						_ = p.Close()
+					}
+				}
+
+				defer closeProcessor()
+
+				reconnect := func() error {
+					closeProcessor()
+
+					resp, err := esClient.ClusterHealth().Do(lctx)
+					if err != nil {
+						return err
+					}
+					if resp.Status != "green" && resp.Status != "yellow" {
+						return fmt.Errorf("elasticsearch cluster status is not green/yellow: '%s'", resp.Status)
+					}
+
+					after := func(executionId int64, _ []elastic.BulkableRequest, resp *elastic.BulkResponse, err error) {
+						if err == nil {
+							// all good, ack the current messages
+							for _, item := range resp.Succeeded() {
+								doAck(item.Id, nil)
+							}
+							return
+						}
+						if resp == nil {
+							logger.Error("Elasticsearch bulk processor global error", "error", err)
+							// nack everything we have
+							for kv := range callbacks.IterBuffered() {
+								doAck(kv.Key, err)
+							}
+							return
+						}
+						for _, item := range resp.Succeeded() {
+							doAck(item.Id, nil)
+						}
+
+						for _, item := range resp.Failed() {
+							if item.Error != nil {
+								doAck(item.Id, &elastic.Error{
+									Status:  item.Status,
+									Details: item.Error,
+								})
+							}
+						}
+
+					}
+
+					processor, err := esClient.BulkProcessor().
+						Name("reaper_to_es").
+						Workers(1).
+						Stats(false).
+						BulkActions(400).
+						BulkSize(5 * 1024 * 1024).
+						FlushInterval(5 * time.Second).
+						After(after).
+						Do(context.Background())
+
+					if err != nil {
+						return err
+					}
+
+					processorRef.Store(processor)
+					return nil
+				}
+
+				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
+					p := getProcessor()
+					if p == nil {
+						return errors.New("not connected to Elasticsearch")
+					}
+					b := entry.JSON()
+					if b == nil {
+						ack(nil)
+						return nil
+					}
+					uid := entry.UID()
+
+					p.Add(
+						elastic.NewBulkIndexRequest().
+							Index(indexName).
+							Type(indexName).
+							Id(uid).
+							Doc(json.RawMessage(b)),
+					)
+
+					callbacks.Set(uid, ack)
+					return nil
+				}
+
+				return action(lctx, g, c, h, reconnect, logger)
+			},
 		},
 		{
 			Name:  "file",
@@ -140,14 +298,14 @@ func BuildApp() *cli.App {
 					EnvVar: "REAPER_OUT_FILE",
 				},
 				cli.BoolFlag{
-					Name: "gzip",
-					Usage: "use gzip compression",
+					Name:   "gzip",
+					Usage:  "use gzip compression",
 					EnvVar: "REAPER_OUT_FILE_GZIP",
 				},
 				cli.IntFlag{
-					Name: "gziplevel",
-					Usage: "gzip level",
-					Value: 6,
+					Name:   "gziplevel",
+					Usage:  "gzip level",
+					Value:  6,
 					EnvVar: "REAPER_OUT_FILE_GZIP_LEVEL",
 				},
 			},
@@ -174,7 +332,7 @@ func BuildApp() *cli.App {
 				cli.StringFlag{
 					Name:   "listname",
 					Usage:  "list to publish in",
-					Value:  "external",
+					Value:  "reaper",
 					EnvVar: "REAPER_TO_REDIS_LIST",
 				},
 				cli.IntFlag{
@@ -236,7 +394,7 @@ func BuildApp() *cli.App {
 				cli.StringFlag{
 					Name:   "topic",
 					Usage:  "Kafka topic to publish to",
-					Value:  "external",
+					Value:  "reaper",
 					EnvVar: "REAPER_TO_KAFKA_TOPIC",
 				},
 			},
@@ -302,7 +460,7 @@ func BuildApp() *cli.App {
 					})
 					producer.Store(kafkaProducer{
 						AsyncProducer: p2,
-						closedOnce: &sync.Once{},
+						closedOnce:    &sync.Once{},
 					})
 					return nil
 				}
@@ -321,6 +479,10 @@ func BuildApp() *cli.App {
 						Metadata: ack,
 						Value:    sarama.ByteEncoder(b),
 						Topic:    topic,
+					}
+					host := entry.Host()
+					if host != "" {
+						msg.Key = sarama.StringEncoder(host)
 					}
 					select {
 					case <-done:
@@ -346,7 +508,7 @@ func BuildApp() *cli.App {
 				cli.StringFlag{
 					Name:   "topic",
 					Usage:  "topic to publish to",
-					Value:  "external",
+					Value:  "reaper",
 					EnvVar: "REAPER_TO_NSQD_TOPIC",
 				},
 			},

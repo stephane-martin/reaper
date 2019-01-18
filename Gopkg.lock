@@ -110,6 +110,19 @@
   revision = "6aacfd5ab513e34f7e64ea9627ab9670371b34e7"
 
 [[projects]]
+  branch = "master"
+  digest = "1:aa3d8d42865c42626b5c1add193692d045b3188b1479f0a0a88690d21fe20083"
+  name = "github.com/mailru/easyjson"
+  packages = [
+    ".",
+    "buffer",
+    "jlexer",
+    "jwriter",
+  ]
+  pruneopts = "UT"
+  revision = "60711f1a8329503b04e1c88535f419d0bb440bff"
+
+[[projects]]
   digest = "1:c658e84ad3916da105a761660dcaeb01e63416c8ec7bc62256a9b411a05fcd67"
   name = "github.com/mattn/go-colorable"
   packages = ["."]
@@ -171,6 +184,26 @@
   version = "v1.3.1"
 
 [[projects]]
+  digest = "1:e9ba3a532b2aedc8f8dcc06e136f794d496be02eb2ab17fb56e4b30152d0cfc1"
+  name = "github.com/olivere/elastic"
+  packages = [
+    ".",
+    "config",
+    "uritemplates",
+  ]
+  pruneopts = "UT"
+  revision = "f5738570b28a4b5fab39442e3a5b5ffc599a562c"
+  version = "v6.2.15"
+
+[[projects]]
+  branch = "master"
+  digest = "1:0fabc073fb52287e01405bd06fe721b968970fc0f6c88714a070afb2097e552a"
+  name = "github.com/orcaman/concurrent-map"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "7ed82d9cb71768a4e3656ee8837c7af568c75459"
+
+[[projects]]
   digest = "1:e39a5ee8fcbec487f8fc68863ef95f2b025e0739b0e4aa55558a2b4cf8f0ecf0"
   name = "github.com/pierrec/lz4"
   packages = [
@@ -180,6 +213,14 @@
   pruneopts = "UT"
   revision = "635575b42742856941dbc767b44905bb9ba083f6"
   version = "v2.0.7"
+
+[[projects]]
+  digest = "1:cf31692c14422fa27c83a05292eb5cbe0fb2775972e8f1f8446a71549bd8980b"
+  name = "github.com/pkg/errors"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "ba968bfe8b2f7e042a574c888954fccecfa385b4"
+  version = "v0.8.1"
 
 [[projects]]
   branch = "master"
@@ -236,6 +277,8 @@
     "github.com/nsqio/go-nsq",
     "github.com/nsqio/nsq/nsqd",
     "github.com/oklog/ulid",
+    "github.com/olivere/elastic",
+    "github.com/orcaman/concurrent-map",
     "github.com/urfave/cli",
     "golang.org/x/sync/errgroup",
     "gopkg.in/mcuadros/go-syslog.v2/format",

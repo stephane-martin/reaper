@@ -5,6 +5,7 @@ import (
 	"github.com/Shopify/sarama"
 	"github.com/inconshreveable/log15"
 	"github.com/nsqio/nsq/nsqd"
+	"github.com/olivere/elastic"
 	"strings"
 )
 
@@ -18,6 +19,22 @@ type adaptedNSQD struct {
 
 type adaptedSarama struct {
 	Logger
+}
+
+type adaptedErrorElastic struct {
+	Logger
+}
+
+type adaptedInfoElastic struct {
+	Logger
+}
+
+func (l adaptedErrorElastic) Printf(format string, v ...interface{}) {
+	l.Logger.Warn("[elastic] " + fmt.Sprintf(format, v...))
+}
+
+func (l adaptedInfoElastic) Printf(format string, v ...interface{}) {
+	l.Logger.Info("[elastic] " + fmt.Sprintf(format, v...))
 }
 
 func (l adaptedSarama) Print(v ...interface{}) {
@@ -38,6 +55,14 @@ func AdaptLoggerNSQD(l Logger) nsqd.Logger {
 
 func AdaptLoggerSarama(l Logger) sarama.StdLogger {
 	return adaptedSarama{Logger: l}
+}
+
+func AdaptErrorLoggerElasticsearch(l Logger) elastic.Logger {
+	return adaptedErrorElastic{Logger: l}
+}
+
+func AdaptInfoLoggerElasticsearch(l Logger) elastic.Logger {
+	return adaptedInfoElastic{Logger: l}
 }
 
 func (l adaptedNSQD) Output(maxDepth int, s string) error {

@@ -34,6 +34,14 @@
     name = "github.com/Shopify/sarama"
     version = "1.20.1"
 
+[[constraint]]
+    name = "github.com/olivere/elastic"
+    version = "6.2.15"
+
+[[constraint]]
+    name = "github.com/orcaman/concurrent-map"
+    branch = "master"
+
 [prune]
   go-tests = true
   unused-packages = true
