@@ -26,6 +26,32 @@ func (e Entry) UID() string {
 	return e["UID"].(string)
 }
 
+func (e Entry) Host() (host string) {
+	var h interface{}
+	var ok bool
+	if h, ok = e["host"]; ok {
+		if host, ok = h.(string); ok {
+			return host
+		}
+	}
+	if h, ok = e["Host"]; ok {
+		if host, ok = h.(string); ok {
+			return host
+		}
+	}
+	if h, ok = e["server"]; ok {
+		if host, ok = h.(string); ok {
+			return host
+		}
+	}
+	if h, ok = e["Server"]; ok {
+		if host, ok = h.(string); ok {
+			return host
+		}
+	}
+	return ""
+}
+
 func (e *Entry) Set(key string, value interface{}) {
 	if value != nil {
 		if v, ok := value.(string); ok && (v == "-" || v == "_") {
