@@ -7,6 +7,10 @@
     {
       "Repository": "honnef.co/go/tools/cmd/staticcheck",
       "Commit": "5bcec433c8ea69ebef8f2aabab7185230b924e0f"
+    },
+    {
+      "Repository": "github.com/hashrocket/ws",
+      "Commit": "bc5163584d57b5dc73e63e58a5a9233174394813"
     }
   ],
   "RetoolVersion": "1.3.7"

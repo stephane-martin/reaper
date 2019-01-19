@@ -9,8 +9,8 @@ DATAFILES = $(shell find data -type f)
 BINARY=reaper
 FULL=github.com/stephane-martin/reaper
 VERSION=0.1.0
-LDFLAGS=-ldflags '-X main.Version=${VERSION}'
-LDFLAGS_RELEASE=-ldflags '-w -s -X main.Version=${VERSION}'
+LDFLAGS=-ldflags '-X main.Version=${VERSION} -X services.GinMode=debug'
+LDFLAGS_RELEASE=-ldflags '-w -s -X main.Version=${VERSION} -X services.GinMode=release'
 
 debug: ${BINARY}_debug
 release: ${BINARY}

@@ -68,10 +68,27 @@ func buildNSQDOptions(c *cli.Context, l Logger) (*nsqd.Options, error) {
 	return opts, nil
 }
 
-func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan Entry, h Handler, reconnect func() error, logger Logger) error {
+var nsqdReadyCtx context.Context
+var nsqdReady context.CancelFunc
+
+func init() {
+	nsqdReadyCtx, nsqdReady = context.WithCancel(context.Background())
+}
+
+func WaitNSQD(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-nsqdReadyCtx.Done():
+		return nil
+	}
+}
+
+func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, h Handler, reconnect func() error, logger Logger) error {
 	daemon := nsqd.New(opts)
 	logger.Info("Starting NSQD")
 	daemon.Main()
+	nsqdReady()
 
 	g, lctx := errgroup.WithContext(ctx)
 
@@ -82,7 +99,7 @@ func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan Entry, h Handle
 	if h != nil {
 		g.Go(func() error {
 			for {
-				err := pullEntries(lctx, opts.TCPAddress, h, logger)
+				err := pullEntries(lctx, "reaper_puller", "reaper_puller", opts.TCPAddress, h, logger)
 				if err == nil || err == context.Canceled {
 					return context.Canceled
 				}
@@ -161,16 +178,16 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 	return err
 }
 
-func pullEntries(ctx context.Context, tcpAddress string, h Handler, logger Logger) error {
+func pullEntries(ctx context.Context, clientID, channel, tcpAddress string, h Handler, logger Logger) error {
 	cfg := nsq.NewConfig()
-	cfg.ClientID = "reaper_puller"
+	cfg.ClientID = clientID
 	cfg.MaxInFlight = 1000
 	cfg.MaxAttempts = 0
 	cfg.Snappy = true
 	cfg.MaxRequeueDelay = 15 * time.Minute
 	cfg.DefaultRequeueDelay = 90 * time.Second
 
-	c, err := nsq.NewConsumer("embedded", "reaper_puller", cfg)
+	c, err := nsq.NewConsumer("embedded", channel, cfg)
 	if err != nil {
 		return err
 	}
@@ -204,7 +221,7 @@ func pullEntries(ctx context.Context, tcpAddress string, h Handler, logger Logge
 	}
 }
 
-func pushEntries(ctx context.Context, tcpAddress string, entries chan Entry, logger Logger) error {
+func pushEntries(ctx context.Context, tcpAddress string, entries chan *Entry, logger Logger) error {
 	cfg := nsq.NewConfig()
 	cfg.ClientID = "reaper_producer"
 	cfg.Snappy = true

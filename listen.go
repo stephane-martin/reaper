@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Format, entries chan Entry, l Logger) error {
+func listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Format, entries chan *Entry, l Logger) error {
 	defer close(entries)
 	g, lctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
@@ -33,7 +33,7 @@ func listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Forma
 				select {
 				case <-lctx.Done():
 					return ctx.Err()
-				case entries <- e:
+				case entries <- &e:
 				}
 			}
 			return s.Err()
@@ -44,7 +44,7 @@ func listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Forma
 }
 
 
-func listenUDP(ctx context.Context, udp []string, f Format, entries chan Entry, l Logger) error {
+func listenUDP(ctx context.Context, udp []string, f Format, entries chan *Entry, l Logger) error {
 	g, lctx := errgroup.WithContext(ctx)
 
 	for _, udpAddr := range udp {
@@ -64,10 +64,14 @@ func listenUDP(ctx context.Context, udp []string, f Format, entries chan Entry, 
 		})
 	}
 
-	return g.Wait()
+	err := g.Wait()
+	if err != nil {
+		l.Debug("Listen UDP returned", "error", err)
+	}
+	return nil
 }
 
-func listenTCP(ctx context.Context, tcp []string, f Format, entries chan Entry, l Logger) error {
+func listenTCP(ctx context.Context, tcp []string, f Format, entries chan *Entry, l Logger) error {
 	g, lctx := errgroup.WithContext(ctx)
 
 	for _, tcpAddr := range tcp {
@@ -99,16 +103,19 @@ func listenTCP(ctx context.Context, tcp []string, f Format, entries chan Entry, 
 			}
 		})
 	}
-
-	return g.Wait()
-}
-
-
-func handleTCP(ctx context.Context, conn net.Conn, f Format, entries chan Entry, l Logger) error {
+	err := g.Wait()
+	if err != nil {
+		l.Debug("Listen TCP returned", "error", err)
+	}
 	return nil
 }
 
-func handleUDP(ctx context.Context, conn net.PacketConn, f Format, entries chan Entry, l Logger) error {
+
+func handleTCP(ctx context.Context, conn net.Conn, f Format, entries chan *Entry, l Logger) error {
+	return nil
+}
+
+func handleUDP(ctx context.Context, conn net.PacketConn, f Format, entries chan *Entry, l Logger) error {
 	buf := make([]byte, 65536)
 	var parser format.RFC3164
 
@@ -161,7 +168,7 @@ func handleUDP(ctx context.Context, conn net.PacketConn, f Format, entries chan 
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case entries <- entry:
+			case entries <- &entry:
 			}
 		}
 		if err != nil {

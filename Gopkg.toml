@@ -42,6 +42,14 @@
     name = "github.com/orcaman/concurrent-map"
     branch = "master"
 
+[[constraint]]
+    name = "github.com/gorilla/websocket"
+    version = "1.4.0"
+
+[[constraint]]
+    name = "github.com/gin-gonic/gin"
+    version = "1.3.0"
+
 [prune]
   go-tests = true
   unused-packages = true

@@ -100,8 +100,14 @@ func BuildApp() *cli.App {
 		cli.StringFlag{
 			Name:   "format",
 			Usage:  "access log format [json, kv, apache_combined, apache_common, nginx_common]",
-			Value:  "kv",
+			Value:  "json",
 			EnvVar: "REAPER_ACCESS_LOG_FORMAT",
+		},
+		cli.StringFlag{
+			Name: "websocket-address",
+			Usage: "listen address for the websocket service (eg '127.0.0.1:8080', leave empty to disable)",
+			Value: "",
+			EnvVar: "REAPER_WEBSOCKET_ADDRESS",
 		},
 	}
 
@@ -130,6 +136,9 @@ func BuildApp() *cli.App {
 		},
 		{
 			Name: "rabbitmq",
+			Usage: "write access logs to rabbitmq",
+			Flags: []cli.Flag{
+			},
 		},
 		{
 			Name:  "elasticsearch",
@@ -578,10 +587,11 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 		return cli.NewExitError(err.Error(), 1)
 	}
 
-	incoming := make(chan Entry, 10000)
+	incoming := make(chan *Entry, 10000)
 	tcpAddrs := c.GlobalStringSlice("tcp")
 	udpAddrs := c.GlobalStringSlice("udp")
 	stdin := c.GlobalBool("stdin")
+	websocketAddr := c.GlobalString("websocket-address")
 
 	g.Go(func() error {
 		return NSQD(ctx, nsqdOpts, incoming, h, reconnect, logger)
@@ -590,6 +600,12 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	g.Go(func() error {
 		return listen(ctx, tcpAddrs, udpAddrs, stdin, format, incoming, logger)
 	})
+
+	if websocketAddr != "" {
+		g.Go(func() error {
+			return ListenWebsocket(ctx, websocketAddr, nsqdOpts.TCPAddress, logger)
+		})
+	}
 
 	err = g.Wait()
 	if err != nil && err != context.Canceled {
