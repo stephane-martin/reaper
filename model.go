@@ -14,57 +14,40 @@ import (
 	SyslogRemoteAddr string            `json:"syslog_remote_addr,omitempty"`
 }*/
 
-type Entry map[string]interface{}
+type Entry struct {
+	UID    string                 `msg:"uid"`
+	Host   string                 `msg:"host"`
+	Fields map[string]interface{} `msg:"fields"`
+}
 
-func NewEntry() Entry {
-	m := make(map[string]interface{})
-	m["UID"] = NewULID().String()
+func NewEntry() *Entry {
+	m := &Entry{
+		UID:    NewULID().String(),
+		Fields: make(map[string]interface{}),
+	}
+	m.Fields["UID"] = m.UID
 	return m
-}
-
-func (e Entry) UID() string {
-	return e["UID"].(string)
-}
-
-func (e Entry) Host() (host string) {
-	var h interface{}
-	var ok bool
-	if h, ok = e["host"]; ok {
-		if host, ok = h.(string); ok {
-			return host
-		}
-	}
-	if h, ok = e["Host"]; ok {
-		if host, ok = h.(string); ok {
-			return host
-		}
-	}
-	if h, ok = e["server"]; ok {
-		if host, ok = h.(string); ok {
-			return host
-		}
-	}
-	if h, ok = e["Server"]; ok {
-		if host, ok = h.(string); ok {
-			return host
-		}
-	}
-	return ""
 }
 
 func (e *Entry) Set(key string, value interface{}) {
 	if value != nil {
 		if v, ok := value.(string); ok && (v == "-" || v == "_") {
-			(*e)[key] = ""
+			e.Fields[key] = ""
 		} else {
-			(*e)[key] = value
+			e.Fields[key] = value
+			key = strings.ToLower(key)
+			if key == "host" {
+				e.Host = fmt.Sprintf("%s", value)
+			} else if key == "server" && e.Host == "" {
+				e.Host = fmt.Sprintf("%s", value)
+			}
 		}
 	}
 }
 
 func (e Entry) String() string {
 	var b strings.Builder
-	for k, v := range e {
+	for k, v := range e.Fields {
 		b.WriteString(k)
 		b.WriteString(`="`)
 		b.WriteString(fmt.Sprintf("%v", v))
@@ -73,9 +56,8 @@ func (e Entry) String() string {
 	return b.String()
 }
 
-
 func (e *Entry) JSON() []byte {
-	b, err := json.Marshal(e)
+	b, err := json.Marshal(e.Fields)
 	if err != nil {
 		return nil
 	}

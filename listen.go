@@ -25,7 +25,7 @@ func listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Forma
 			L:
 			for s.Scan() {
 				e := NewEntry()
-				err := ParseContent(f, s.Text(), &e, l)
+				err := ParseContent(f, s.Text(), e, l)
 				if err != nil {
 					l.Warn("Failed to parse access log", "error", err)
 					continue L
@@ -33,7 +33,7 @@ func listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Forma
 				select {
 				case <-lctx.Done():
 					return ctx.Err()
-				case entries <- &e:
+				case entries <- e:
 				}
 			}
 			return s.Err()
@@ -158,7 +158,7 @@ func handleUDP(ctx context.Context, conn net.PacketConn, f Format, entries chan 
 				if !ok {
 					continue L
 				}
-				err := ParseContent(f, content, &entry, l)
+				err := ParseContent(f, content, entry, l)
 				if err != nil {
 					l.Warn("Failed to parse access log", "error", err)
 					continue L
@@ -168,7 +168,7 @@ func handleUDP(ctx context.Context, conn net.PacketConn, f Format, entries chan 
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case entries <- &entry:
+			case entries <- entry:
 			}
 		}
 		if err != nil {

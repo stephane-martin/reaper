@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -157,9 +156,9 @@ func (h *handler) markError(err error) {
 func (h *handler) HandleMessage(message *nsq.Message) error {
 	message.DisableAutoResponse()
 	var entry Entry
-	err := json.Unmarshal(message.Body, &entry)
+	_, err := entry.UnmarshalMsg(message.Body)
 	if err != nil {
-		h.logger.Warn("Failed to unmarshal message from nsqd", "error", err)
+		h.logger.Warn("Failed to messagepack-unmarshal entry from nsqd", "error", err)
 		message.Finish()
 		return nil
 	}
@@ -271,8 +270,10 @@ func pushEntries(ctx context.Context, tcpAddress string, entries chan *Entry, lo
 					entries = nil
 					continue L
 				}
-				b := entry.JSON()
-				if b != nil {
+				b, err := entry.MarshalMsg(nil)
+				if err != nil {
+					logger.Warn("Failed to messagepack-encode entry", "error", err)
+				} else {
 					err := p.PublishAsync("embedded", b, doneChan)
 					if err != nil {
 						return err

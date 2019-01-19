@@ -279,17 +279,16 @@ func BuildApp() *cli.App {
 						ack(nil)
 						return nil
 					}
-					uid := entry.UID()
 
 					p.Add(
 						elastic.NewBulkIndexRequest().
 							Index(indexName).
 							Type(indexName).
-							Id(uid).
+							Id(entry.UID).
 							Doc(json.RawMessage(b)),
 					)
 
-					callbacks.Set(uid, ack)
+					callbacks.Set(entry.UID, ack)
 					return nil
 				}
 
@@ -489,9 +488,8 @@ func BuildApp() *cli.App {
 						Value:    sarama.ByteEncoder(b),
 						Topic:    topic,
 					}
-					host := entry.Host()
-					if host != "" {
-						msg.Key = sarama.StringEncoder(host)
+					if entry.Host != "" {
+						msg.Key = sarama.StringEncoder(entry.Host)
 					}
 					select {
 					case <-done:

@@ -30,11 +30,11 @@ clean:
 version:
 	echo ${VERSION}
 
-${BINARY}_debug: ${SOURCES}
+${BINARY}_debug: ${SOURCES} model_gen.go
 	dep ensure
 	CGO_ENABLED=0 go build -x -tags 'netgo osusergo' -o ${BINARY}_debug ${LDFLAGS} ${FULL}
 
-${BINARY}: ${SOURCES}
+${BINARY}: ${SOURCES} model_gen.go
 	dep ensure
 	CGO_ENABLED=0 go build -a -installsuffix nocgo -tags 'netgo osusergo' -o ${BINARY} ${LDFLAGS_RELEASE} ${FULL}
 
@@ -46,3 +46,5 @@ retool:
 	./retool sync
 	touch .tools_sync
 
+model_gen.go: .tools_sync model.go
+	./retool do msgp -file model.go
