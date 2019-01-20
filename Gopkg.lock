@@ -140,6 +140,18 @@
   version = "v2.14"
 
 [[projects]]
+  digest = "1:f317a5a015ff49664295c9f69267c1f98662cbb3bc1ce9b34320eb2a00335c81"
+  name = "github.com/influxdata/go-syslog"
+  packages = [
+    ".",
+    "nontransparent",
+    "rfc5424",
+  ]
+  pruneopts = "UT"
+  revision = "0cd00a9f0a5e5607d5ef9a294c260f77a74e3b5a"
+  version = "v2.0.0"
+
+[[projects]]
   digest = "1:3e551bbb3a7c0ab2a2bf4660e7fcad16db089fdcfbb44b0199e62838038623ea"
   name = "github.com/json-iterator/go"
   packages = ["."]
@@ -153,6 +165,17 @@
   packages = ["."]
   pruneopts = "UT"
   revision = "6aacfd5ab513e34f7e64ea9627ab9670371b34e7"
+
+[[projects]]
+  branch = "develop"
+  digest = "1:dca213cb9c3d4b66f21d536c0e4cdedbe3d53c7b82311bab6f92dbeb94a4b5bc"
+  name = "github.com/leodido/ragel-machinery"
+  packages = [
+    ".",
+    "parser",
+  ]
+  pruneopts = "UT"
+  revision = "299bdde78165d4ca4bc7d064d8d6a4f39ac6de8c"
 
 [[projects]]
   branch = "master"
@@ -348,19 +371,6 @@
   version = "v8.18.2"
 
 [[projects]]
-  digest = "1:005eef14babbeaaa78c1be5df061a7ea00c3dfd93b41e02d2093a64bffca446e"
-  name = "gopkg.in/mcuadros/go-syslog.v2"
-  packages = [
-    "format",
-    "internal/syslogparser",
-    "internal/syslogparser/rfc3164",
-    "internal/syslogparser/rfc5424",
-  ]
-  pruneopts = "UT"
-  revision = "9cf13b7327c0e153da3cba3540c2ae2b879c3859"
-  version = "v2.2.1"
-
-[[projects]]
   digest = "1:4d2e5a73dc1500038e504a8d78b986630e3626dc027bc030ba5c75da257cdb96"
   name = "gopkg.in/yaml.v2"
   packages = ["."]
@@ -377,6 +387,9 @@
     "github.com/go-redis/redis",
     "github.com/gorilla/websocket",
     "github.com/inconshreveable/log15",
+    "github.com/influxdata/go-syslog",
+    "github.com/influxdata/go-syslog/nontransparent",
+    "github.com/influxdata/go-syslog/rfc5424",
     "github.com/nsqio/go-nsq",
     "github.com/nsqio/nsq/nsqd",
     "github.com/oklog/ulid",
@@ -385,7 +398,6 @@
     "github.com/tinylib/msgp/msgp",
     "github.com/urfave/cli",
     "golang.org/x/sync/errgroup",
-    "gopkg.in/mcuadros/go-syslog.v2/format",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1

@@ -3,21 +3,24 @@ package main
 import (
 	"bufio"
 	"context"
+	"github.com/influxdata/go-syslog"
+	"github.com/influxdata/go-syslog/nontransparent"
+	"github.com/influxdata/go-syslog/rfc5424"
 	"golang.org/x/sync/errgroup"
-	"gopkg.in/mcuadros/go-syslog.v2/format"
 	"net"
 	"os"
+	"strings"
 	"time"
 )
 
-func listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Format, entries chan *Entry, l Logger) error {
+func listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Format, useRFC5424 bool, entries chan *Entry, l Logger) error {
 	defer close(entries)
 	g, lctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		return listenTCP(lctx, tcp, f, entries, l)
+		return listenTCP(lctx, tcp, f, useRFC5424, entries, l)
 	})
 	g.Go(func() error {
-		return listenUDP(lctx, udp, f, entries, l)
+		return listenUDP(lctx, udp, f, useRFC5424, entries, l)
 	})
 	if stdin {
 		g.Go(func() error {
@@ -25,7 +28,7 @@ func listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Forma
 			L:
 			for s.Scan() {
 				e := NewEntry()
-				err := ParseContent(f, s.Text(), e, l)
+				err := ParseAccessLogLine(f, s.Text(), e, l)
 				if err != nil {
 					l.Warn("Failed to parse access log", "error", err)
 					continue L
@@ -44,7 +47,7 @@ func listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Forma
 }
 
 
-func listenUDP(ctx context.Context, udp []string, f Format, entries chan *Entry, l Logger) error {
+func listenUDP(ctx context.Context, udp []string, f Format, useRFC5424 bool, entries chan *Entry, l Logger) error {
 	g, lctx := errgroup.WithContext(ctx)
 
 	for _, udpAddr := range udp {
@@ -60,7 +63,7 @@ func listenUDP(ctx context.Context, udp []string, f Format, entries chan *Entry,
 				_ = pconn.Close()
 				return lctx.Err()
 			})
-			return handleUDP(lctx, pconn, f, entries, l)
+			return handleUDP(lctx, pconn, f, useRFC5424, entries, l)
 		})
 	}
 
@@ -71,7 +74,7 @@ func listenUDP(ctx context.Context, udp []string, f Format, entries chan *Entry,
 	return nil
 }
 
-func listenTCP(ctx context.Context, tcp []string, f Format, entries chan *Entry, l Logger) error {
+func listenTCP(ctx context.Context, tcp []string, f Format, useRFC5424 bool, entries chan *Entry, l Logger) error {
 	g, lctx := errgroup.WithContext(ctx)
 
 	for _, tcpAddr := range tcp {
@@ -85,7 +88,7 @@ func listenTCP(ctx context.Context, tcp []string, f Format, entries chan *Entry,
 			g.Go(func() error {
 				<-lctx.Done()
 				_ = listener.Close()
-				return lctx.Err()
+				return nil
 			})
 			for {
 				conn, err := listener.Accept()
@@ -95,10 +98,10 @@ func listenTCP(ctx context.Context, tcp []string, f Format, entries chan *Entry,
 				g.Go(func() error {
 					<-lctx.Done()
 					_ = conn.Close()
-					return lctx.Err()
+					return nil
 				})
 				g.Go(func() error {
-					return handleTCP(lctx, conn, f, entries, l)
+					return handleTCP(lctx, conn, f, useRFC5424, entries, l)
 				})
 			}
 		})
@@ -111,59 +114,147 @@ func listenTCP(ctx context.Context, tcp []string, f Format, entries chan *Entry,
 }
 
 
-func handleTCP(ctx context.Context, conn net.Conn, f Format, entries chan *Entry, l Logger) error {
+func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, entries chan *Entry, l Logger) error {
+	if useRFC5424 {
+		p := nontransparent.NewParser(
+			syslog.WithBestEffort(),
+			syslog.WithListener(func(res *syslog.Result) {
+				if res.Error != nil {
+					l.Info("Failed to parse RFC5424 stream", "error", res.Error)
+					return
+				}
+				if res.Message.Message() == nil {
+					return
+				}
+				msg := strings.TrimSpace(*res.Message.Message())
+				if msg == "" {
+					return
+				}
+				entry := NewEntry()
+				if res.Message.Hostname() != nil {
+					entry.Set("syslog_hostname", *(res.Message.Hostname()))
+				}
+				if res.Message.Timestamp() != nil {
+					entry.Set("syslog_timestamp", (*(res.Message.Timestamp())).Format(time.RFC3339))
+				}
+				err := ParseAccessLogLine(f, msg, entry, l)
+				if err != nil {
+					l.Info("Failed to parse TCP/RFC5424 message", "error", err)
+					return
+				}
+				select {
+				case <-ctx.Done():
+				case entries <- entry:
+				}
+			}),
+		)
+		p.Parse(conn)
+		return nil
+	}
+	scanner := WithContext(ctx, bufio.NewScanner(conn))
+	for scanner.Scan() {
+		entry, err := parseRFC3164(scanner.Bytes(), f, l)
+		if err != nil {
+			l.Info("Failed to parse TCP/RFC3164 message", "error", err)
+			continue
+		}
+		if entry == nil {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case entries <- entry:
+		}
+	}
+	err := scanner.Err()
+	if err != nil {
+
+	}
 	return nil
 }
 
-func handleUDP(ctx context.Context, conn net.PacketConn, f Format, entries chan *Entry, l Logger) error {
+var rfc5424Parser = rfc5424.NewParser(rfc5424.WithBestEffort())
+
+func parseRFC5424(buf []byte, f Format, l Logger) (*Entry, error) {
+	m, err := rfc5424Parser.Parse(buf)
+	if err != nil {
+		return nil, err
+	}
+	if m.Message() == nil {
+		return nil, EmptyMessageError
+	}
+
+	entry := NewEntry()
+	if m.Hostname() != nil {
+		entry.Set("syslog_hostname", *m.Hostname())
+	}
+	if m.Timestamp() != nil {
+		entry.Set("syslog_timestamp", (*m.Timestamp()).Format(time.RFC3339))
+	}
+	err = ParseAccessLogLine(f, *m.Message(), entry, l)
+	if err != nil {
+		return nil, err
+	}
+	return entry, nil
+}
+
+func parseRFC3164(buf []byte, f Format, l Logger) (*Entry, error) {
+	m, err := p3164(buf)
+	if err != nil {
+		return nil, err
+	}
+	if m.Message == "" {
+		return nil, EmptyMessageError
+	}
+
+	entry := NewEntry()
+	if m.HostName != "" {
+		entry.Set("syslog_hostname", m.HostName)
+	}
+	if m.Time != nil {
+		entry.Set("syslog_timestamp", m.Time.Format(time.RFC3339))
+	}
+
+	err = ParseAccessLogLine(f, m.Message, entry, l)
+	if err != nil {
+		return nil, err
+	}
+
+	return entry, nil
+}
+
+func handleUDP(ctx context.Context, conn net.PacketConn, f Format, useRFC5424 bool, entries chan *Entry, l Logger) error {
 	buf := make([]byte, 65536)
-	var parser format.RFC3164
+	var (
+		addr net.Addr
+		err, pErr error
+		n int
+		entry *Entry
+	)
 
 	L:
 	for {
-		n, addr, err := conn.ReadFrom(buf)
+		n, addr, err = conn.ReadFrom(buf)
 		if n > 0 {
-			p := parser.GetParser(buf[:n])
-			err := p.Parse()
-			if err != nil {
+			if useRFC5424 {
+				entry, pErr = parseRFC5424(buf[:n], f, l)
+				if pErr != nil {
+					l.Info("Failed to parse UDP/RFC5424 message", "error", err)
+					continue L
+				}
+			} else {
+				entry, pErr = parseRFC3164(buf[:n], f, l)
+				if pErr != nil {
+					l.Info("Failed to parse UDP/RFC3164 message", "error", err)
+					continue L
+				}
+			}
+
+			if entry == nil {
 				continue L
 			}
-			parts := p.Dump()
-
-			hostname := ""
-			if parts["hostname"] != nil {
-				h, ok := parts["hostname"].(string)
-				if !ok {
-					continue L
-				}
-				hostname = h
-			}
-
-			var timestamp *time.Time
-			if parts["timestamp"] != nil {
-				t, ok := parts["timestamp"].(time.Time)
-				if !ok {
-					continue L
-				}
-				timestamp = &t
-			}
-
-			entry := NewEntry()
-			entry.Set("syslog_hostname", hostname)
-			entry.Set("syslog_timestamp", timestamp)
 			entry.Set("syslog_remote_addr", addr.String())
-
-			if parts["content"] != nil {
-				content, ok := parts["content"].(string)
-				if !ok {
-					continue L
-				}
-				err := ParseContent(f, content, entry, l)
-				if err != nil {
-					l.Warn("Failed to parse access log", "error", err)
-					continue L
-				}
-			}
 
 			select {
 			case <-ctx.Done():

@@ -69,6 +69,11 @@ func BuildApp() *cli.App {
 			EnvVar: "REAPER_UDP_ADDRESS",
 		},
 		cli.BoolFlag{
+			Name: "rfc5424",
+			Usage: "when receiving with syslog, use RFC5424 format",
+			EnvVar: "REAPER_RFC5424",
+		},
+		cli.BoolFlag{
 			Name:   "stdin",
 			Usage:  "receive logs on stdin",
 			EnvVar: "REAPER_STDIN",
@@ -589,6 +594,7 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	tcpAddrs := c.GlobalStringSlice("tcp")
 	udpAddrs := c.GlobalStringSlice("udp")
 	stdin := c.GlobalBool("stdin")
+	useRFC5424 := c.GlobalBool("rfc5424")
 	websocketAddr := c.GlobalString("websocket-address")
 
 	g.Go(func() error {
@@ -596,7 +602,7 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	})
 
 	g.Go(func() error {
-		return listen(ctx, tcpAddrs, udpAddrs, stdin, format, incoming, logger)
+		return listen(ctx, tcpAddrs, udpAddrs, stdin, format, useRFC5424, incoming, logger)
 	})
 
 	if websocketAddr != "" {

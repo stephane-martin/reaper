@@ -17,8 +17,17 @@ const (
 	JSON Format = iota
 	KeyValues
 	Combined
-	ApacheCommon
+	Common
 )
+
+type AccessLogParser func(string, *Entry, Logger) error
+
+var parsers = map[Format]AccessLogParser{
+	JSON: parseJSON,
+	KeyValues: parseKV,
+	Combined: parseCombined,
+	Common: parseCommon,
+}
 
 func GetFormat(c *cli.Context) (Format, error) {
 	f := strings.TrimSpace(strings.ToLower(c.GlobalString("format")))
@@ -29,28 +38,19 @@ func GetFormat(c *cli.Context) (Format, error) {
 		return KeyValues, nil
 	case "combined":
 		return Combined, nil
-	case "apache_common":
-		return ApacheCommon, nil
+	case "common":
+		return Common, nil
 	default:
 		return 0, errors.New("unknown content format")
 	}
 }
 
-
-func ParseContent(f Format, content string, e *Entry, logger Logger) error {
-	content = strings.TrimSpace(content)
-	switch f {
-	case JSON:
-		return parseJSON(content, e, logger)
-	case KeyValues:
-		return parseKV(content, e, logger)
-	case Combined:
-		return parseCombined(content, e, logger)
-	case ApacheCommon:
-		return parseApacheCommon(content, e, logger)
-	default:
-		return errors.New("unknown content format")
+func ParseAccessLogLine(f Format, content string, e *Entry, logger Logger) error {
+	p := parsers[f]
+	if p == nil {
+		return errors.New("unknown access log format")
 	}
+	return p(content, e, logger)
 }
 
 func parseKV(content string, e *Entry, logger Logger) error {
@@ -137,9 +137,15 @@ func parseKV(content string, e *Entry, logger Logger) error {
 }
 
 func parseCombined(content string, e *Entry, logger Logger) error {
-	// log_format combined '$remote_addr - $remote_user [$time_local] '
-	//                     '"$request" $status $body_bytes_sent '
-	//                     '"$http_referer" "$http_user_agent"';
+	// Nginx
+	// '$remote_addr - $remote_user [$time_local] '
+	// '"$request" $status $body_bytes_sent '
+	// '"$http_referer" "$http_user_agent"';
+
+	// Apache
+	// "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-agent}i\""
+
+
 	tokens := make([]string, 0, 12)
 	var s scanner.Scanner
 	s.Error = func(_ *scanner.Scanner, msg string) {
@@ -178,6 +184,8 @@ func parseCombined(content string, e *Entry, logger Logger) error {
 	bytesBodySent, err := strconv.ParseInt(tokens[9], 10, 64)
 	if err == nil {
 		e.Set("bytes_body_sent", bytesBodySent)
+	} else {
+		e.Set("bytes_body_sent", int(0))
 	}
 	referer, err := strconv.Unquote(tokens[10])
 	if err == nil {
@@ -190,12 +198,66 @@ func parseCombined(content string, e *Entry, logger Logger) error {
 	return nil
 }
 
-func parseApacheCommon(content string, e *Entry, logger Logger) error {
+func parseCommon(content string, e *Entry, logger Logger) error {
+	// Apache
 	// LogFormat "%h %l %u %t \"%r\" %>s %b" common
+	// %h Remote hostname
+	// %l Remote logname
+	// %u Remote user
+	// %t time [18/Sep/2011:19:18:28 -0400]
+	// %r First line of request
+	// %>s status
+	// %b Size of response, excluding HTTP headers. '-' rather than a 0.
+
+	// Caddy:
+	// {remote} - {user} [{when}] \"{method} {uri} {proto}\" {status} {size}
+
+	tokens := make([]string, 0, 10)
+	var s scanner.Scanner
+	s.Error = func(_ *scanner.Scanner, msg string) {
+		logger.Debug("error in text scanner", "msg", msg)
+	}
+	s.IsIdentRune = func(ch rune, i int) bool {
+		if ch == '.' || ch == '/' || ch == ':' || ch == '+' || ch == '-' {
+			return true
+		}
+		if unicode.IsLetter(ch) {
+			return true
+		}
+		if unicode.IsDigit(ch) {
+			return true
+		}
+		return false
+	}
+	s.Init(strings.NewReader(content))
+	for tok := s.Scan(); tok != scanner.EOF; tok = s.Scan() {
+		tokens = append(tokens, s.TokenText())
+	}
+	e.Set("remote_addr", tokens[0])
+	e.Set("remote_user", tokens[2])
+	t, err := time.Parse("02/Jan/2006:15:04:05 -0700", tokens[4] + " " + tokens[5])
+	if err == nil {
+		e.Set("time_local", t.Format(time.RFC3339))
+	}
+	req, err := strconv.Unquote(tokens[7])
+	if err == nil {
+		e.Set("request", req)
+	}
+	status, err := strconv.ParseInt(tokens[8], 10, 64)
+	if err == nil {
+		e.Set("status", status)
+	}
+	bytesBodySent, err := strconv.ParseInt(tokens[9], 10, 64)
+	if err == nil {
+		e.Set("bytes_body_sent", bytesBodySent)
+	} else {
+		e.Set("bytes_body_sent", int(0))
+	}
+
 	return nil
 }
 
-func parseJSON(content string, e *Entry, logger Logger) error {
+func parseJSON(content string, e *Entry, _ Logger) error {
 	fields := make(map[string]interface{})
 	err := json.Unmarshal([]byte(content), &fields)
 	if err != nil {
