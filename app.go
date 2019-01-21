@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Shopify/sarama"
+	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis"
 	"github.com/nsqio/go-nsq"
 	"github.com/olivere/elastic"
@@ -15,6 +16,8 @@ import (
 	"github.com/urfave/cli"
 	"golang.org/x/sync/errgroup"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -113,6 +116,12 @@ func BuildApp() *cli.App {
 			Usage: "listen address for the websocket service (eg '127.0.0.1:8080', leave empty to disable)",
 			Value: "",
 			EnvVar: "REAPER_WEBSOCKET_ADDRESS",
+		},
+		cli.StringFlag{
+			Name: "http-address",
+			Usage: "listen address for the websocket service (eg '127.0.0.1:8080', leave empty to disable)",
+			Value: "",
+			EnvVar: "REAPER_HTTP_ADDRESS",
 		},
 	}
 
@@ -580,14 +589,21 @@ func main() {
 	_ = BuildApp().Run(os.Args)
 }
 
-func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, reconnect func() error, logger Logger) error {
+func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, reconnect func() error, logger Logger) (err error) {
+	defer func() {
+		if err != nil {
+			err = cli.NewExitError(err.Error(), 1)
+		}
+	}()
+
 	nsqdOpts, err := buildNSQDOptions(c, logger)
 	if err != nil {
-		return cli.NewExitError(err.Error(), 1)
+		return err
 	}
+
 	format, err := GetFormat(c)
 	if err != nil {
-		return cli.NewExitError(err.Error(), 1)
+		return err
 	}
 
 	incoming := make(chan *Entry, 10000)
@@ -596,6 +612,37 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	stdin := c.GlobalBool("stdin")
 	useRFC5424 := c.GlobalBool("rfc5424")
 	websocketAddr := c.GlobalString("websocket-address")
+	httpAddr := c.GlobalString("http-address")
+
+	var httpRoutes, websocketRoutes *gin.Engine
+	var httpListener, websocketListener net.Listener
+
+	if httpAddr != "" {
+		httpRoutes = gin.Default()
+		HTTPRoutes(ctx, httpRoutes, nsqdOpts.TCPAddress, nsqdOpts.HTTPAddress, logger)
+	}
+
+	if websocketAddr != "" {
+		websocketRoutes = httpRoutes
+		if websocketAddr != httpAddr {
+			websocketRoutes = gin.Default()
+		}
+		WebsocketRoutes(ctx, websocketRoutes, nsqdOpts.TCPAddress, logger)
+	}
+
+	if httpRoutes != nil {
+		httpListener, err = net.Listen("tcp", httpAddr)
+		if err != nil {
+			return err
+		}
+	}
+
+	if websocketRoutes != nil && websocketAddr != httpAddr {
+		websocketListener, err = net.Listen("tcp", websocketAddr)
+		if err != nil {
+			return err
+		}
+	}
 
 	g.Go(func() error {
 		return NSQD(ctx, nsqdOpts, incoming, h, reconnect, logger)
@@ -605,15 +652,35 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 		return listen(ctx, tcpAddrs, udpAddrs, stdin, format, useRFC5424, incoming, logger)
 	})
 
-	if websocketAddr != "" {
+	if httpListener != nil {
 		g.Go(func() error {
-			return ListenWebsocket(ctx, websocketAddr, nsqdOpts.TCPAddress, logger)
+			err := http.Serve(httpListener, httpRoutes)
+			logger.Debug("HTTP returned", "error", err)
+			return nil
+		})
+		g.Go(func() error {
+			<-ctx.Done()
+			_ = httpListener.Close()
+			return nil
+		})
+	}
+
+	if websocketListener != nil {
+		g.Go(func() error {
+			err := http.Serve(websocketListener, websocketRoutes)
+			logger.Debug("Websocket returned", "error", err)
+			return nil
+		})
+		g.Go(func() error {
+			<-ctx.Done()
+			_ = websocketListener.Close()
+			return nil
 		})
 	}
 
 	err = g.Wait()
 	if err != nil && err != context.Canceled {
-		return cli.NewExitError(err.Error(), 1)
+		return err
 	}
 	return nil
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/nsqio/go-nsq"
 	"github.com/nsqio/nsq/nsqd"
 	"github.com/urfave/cli"
+	utomic "go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -34,12 +35,6 @@ func buildNSQDOptions(c *cli.Context, l Logger) (*nsqd.Options, error) {
 	opts.MemQueueSize = 10000
 	opts.StatsdMemStats = false
 	opts.StatsdPrefix = "nsqd.embedded.%s"
-	l.Info("Starting embedded nsqd",
-		"addr", listenAddr,
-		"tcp", opts.TCPAddress,
-		"http", opts.HTTPAddress,
-		"datapath", opts.DataPath,
-	)
 	opts.SnappyEnabled = true
 	opts.DeflateEnabled = true
 
@@ -85,7 +80,11 @@ func WaitNSQD(ctx context.Context) error {
 
 func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, h Handler, reconnect func() error, logger Logger) error {
 	daemon := nsqd.New(opts)
-	logger.Info("Starting NSQD")
+	logger.Info("Starting embedded nsqd",
+		"tcp", opts.TCPAddress,
+		"http", opts.HTTPAddress,
+		"datapath", opts.DataPath,
+	)
 	daemon.Main()
 	nsqdReady()
 
@@ -98,7 +97,7 @@ func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, h Handl
 	if h != nil {
 		g.Go(func() error {
 			for {
-				err := pullEntries(lctx, "reaper_puller", "reaper_puller", opts.TCPAddress, h, logger)
+				err := pullEntries(lctx, "reaper_puller", "reaper_puller", opts.TCPAddress, h, -1, 1000, logger)
 				if err == nil || err == context.Canceled {
 					return context.Canceled
 				}
@@ -134,16 +133,24 @@ func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, h Handl
 type Handler func(<-chan struct{}, *Entry, func(error)) error
 
 type handler struct {
-	th     Handler
-	logger Logger
-	done   <-chan struct{}
-	errs   chan error
-	once   sync.Once
+	th         Handler
+	logger     Logger
+	done       <-chan struct{}
+	errs       chan error
+	once       sync.Once
+	returned   utomic.Int64
+	maxEntries int64
 }
 
 func (h *handler) markError(err error) {
+	if err == nil {
+		return
+	}
 	h.once.Do(func() {
-		h.logger.Warn("Failed to handle message", "error", err)
+		if err != PullFinished {
+			h.logger.Warn("Failed to handle message", "error", err)
+		}
+
 		select {
 		case h.errs <- err:
 			close(h.errs)
@@ -153,8 +160,23 @@ func (h *handler) markError(err error) {
 	})
 }
 
+var PullFinished = errors.New("pull finished")
+
 func (h *handler) HandleMessage(message *nsq.Message) error {
 	message.DisableAutoResponse()
+
+	if h.maxEntries != -1 {
+		returned := h.returned.Inc()
+		if returned == h.maxEntries {
+			h.markError(PullFinished)
+		} else if returned > h.maxEntries {
+			message.RequeueWithoutBackoff(0)
+			h.markError(PullFinished)
+			return PullFinished
+		}
+		h.logger.Debug("debug", "returned", returned)
+	}
+
 	var entry Entry
 	_, err := entry.UnmarshalMsg(message.Body)
 	if err != nil {
@@ -163,46 +185,53 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 		return nil
 	}
 	err = h.th(h.done, &entry, func(e error) {
+		h.markError(e)
 		if e == nil {
 			message.Finish()
 		} else {
 			message.Requeue(-1)
-			h.markError(e)
 		}
 	})
+	h.markError(err)
 	if err != nil {
 		message.Requeue(-1)
-		h.markError(err)
 	}
 	return err
 }
 
-func pullEntries(ctx context.Context, clientID, channel, tcpAddress string, h Handler, logger Logger) error {
+func pullEntries(ctx context.Context, cID, chnl, nsqAddr string, h Handler, maxReturned, maxInFlight int, l Logger) error {
+	if maxInFlight <= 0 {
+		maxInFlight = 1000
+	}
+	if maxReturned <= 0 {
+		maxReturned = -1
+	}
 	cfg := nsq.NewConfig()
-	cfg.ClientID = clientID
-	cfg.MaxInFlight = 1000
+	cfg.ClientID = cID
+	cfg.MaxInFlight = maxInFlight
 	cfg.MaxAttempts = 0
 	cfg.Snappy = true
 	cfg.MaxRequeueDelay = 15 * time.Minute
 	cfg.DefaultRequeueDelay = 90 * time.Second
 
-	c, err := nsq.NewConsumer("embedded", channel, cfg)
+	c, err := nsq.NewConsumer("embedded", chnl, cfg)
 	if err != nil {
 		return err
 	}
-	c.SetLogger(AdaptLoggerNSQD(logger), nsq.LogLevelInfo)
+	c.SetLogger(AdaptLoggerNSQD(l), nsq.LogLevelInfo)
 	errs := make(chan error)
 
 	c.AddHandler(&handler{
 		th:     h,
-		logger: logger,
+		logger: l,
 		done:   ctx.Done(),
 		errs:   errs,
+		maxEntries: int64(maxReturned),
 	})
 
-	err = c.ConnectToNSQD(tcpAddress)
+	err = c.ConnectToNSQD(nsqAddr)
 	if err != nil {
-		logger.Warn("Failed to connect to embedded nsqd", "error", err)
+		l.Warn("Failed to connect to embedded nsqd", "error", err)
 		return err
 	}
 	defer func() {

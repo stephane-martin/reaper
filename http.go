@@ -1,0 +1,167 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"github.com/gin-gonic/gin"
+	"github.com/pkg/errors"
+	"golang.org/x/sync/errgroup"
+	"io"
+	"net/http"
+	"strconv"
+	"time"
+	"unicode"
+	"unicode/utf8"
+)
+
+func validClientID(clientID string) bool {
+	if !utf8.ValidString(clientID) {
+		return false
+	}
+	var char rune
+	for _, char = range clientID {
+		if char == '-' {
+			continue
+		}
+		if char == '_' {
+			continue
+		}
+		if unicode.IsLetter(char) {
+			continue
+		}
+		if unicode.IsDigit(char) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+type EntryACK struct {
+	Entry *Entry
+	ACK func(error)
+}
+
+func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAddr string, logger Logger) {
+
+	router.GET("/status", func(c *gin.Context) {
+		c.Status(200)
+	})
+
+	router.DELETE("/download/:clientid", func(c *gin.Context) {
+		clientID := c.Param("clientid")
+		if !validClientID(clientID) {
+			_ = c.AbortWithError(400, errors.New("invalid client ID"))
+			return
+		}
+		channel := fmt.Sprintf("reaper_http_download_%s", clientID)
+		u := fmt.Sprintf("http://%s/channel/delete?topic=embedded&channel=%s", nsqdHTTPAddr, channel)
+		resp, err := http.Post(u, "", nil)
+		if err != nil {
+			_ = c.AbortWithError(500, err)
+			return
+		}
+		//noinspection GoUnhandledErrorResult
+		defer resp.Body.Close()
+		c.Status(resp.StatusCode)
+		_, err = io.Copy(c.Writer, resp.Body)
+		if err != nil {
+			logger.Info("Channel delete error", "error", err)
+		}
+	})
+
+	router.POST("/download/:clientid", func(c *gin.Context) {
+		clientID := c.Param("clientid")
+		if !validClientID(clientID) {
+			_ = c.AbortWithError(400, errors.New("invalid client ID"))
+			return
+		}
+
+		sizeStr := c.DefaultQuery("size", "1000")
+		size, err := strconv.Atoi(sizeStr)
+		if err != nil {
+			_ = c.AbortWithError(400, err)
+			return
+		}
+		if size <= 0 {
+			_ = c.AbortWithError(400, errors.New("size is negative"))
+			return
+		}
+
+		waitStr := c.DefaultQuery("wait", "3000")
+		wait, err := strconv.Atoi(waitStr)
+		if err != nil {
+			_ = c.AbortWithError(400, err)
+			return
+		}
+		if wait <= 0 {
+			_ = c.AbortWithError(400, errors.New("wait is negative"))
+		}
+		waitDuration := time.Duration(wait) * time.Millisecond
+
+
+		channel := fmt.Sprintf("reaper_http_download_%s", clientID)
+		nsqClientID := fmt.Sprintf("reaper_http_download_%s", NewULID().String())
+		logger.Debug("HTTP Download", "clientID", clientID, "channel", channel, "size", size)
+
+
+		entries := make(chan EntryACK)
+
+		handler := func(done <-chan struct{}, e *Entry, ack func(error)) error {
+			select {
+			case <-done:
+				return PullFinished
+			case entries <- EntryACK{Entry: e, ACK: ack}:
+				return nil
+			}
+		}
+
+		g, lctx := errgroup.WithContext(ctx)
+
+		g.Go(func() error {
+			err := pullEntries(lctx, nsqClientID, channel, nsqdTCPAddr, handler, size, 1, logger)
+			close(entries)
+			if err == PullFinished {
+				return nil
+			}
+			return err
+		})
+
+		g.Go(func() error {
+			rCtx := c.Request.Context()
+			for {
+				select {
+				case <-lctx.Done():
+					return nil
+				case <-rCtx.Done():
+					return rCtx.Err()
+				case <-time.After(waitDuration):
+					return context.DeadlineExceeded
+				case entryACK, ok := <-entries:
+					if !ok {
+						return nil
+					}
+					b := entryACK.Entry.JSON()
+					if b == nil {
+						entryACK.ACK(nil)
+					} else {
+						b = append(b, '\n')
+						_, err := c.Writer.Write(b)
+						entryACK.ACK(err)
+						if err != nil {
+							return err
+						}
+						c.Writer.Flush()
+					}
+				}
+			}
+		})
+
+		err = g.Wait()
+		if err != nil {
+			logger.Info("HTTP download handler returns with error", "error", err)
+		}
+
+	})
+
+}

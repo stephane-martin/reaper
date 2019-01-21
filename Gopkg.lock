@@ -347,6 +347,14 @@
   version = "v1.20.0"
 
 [[projects]]
+  digest = "1:3c1a69cdae3501bf75e76d0d86dc6f2b0a7421bc205c0cb7b96b19eed464a34d"
+  name = "go.uber.org/atomic"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "1ea20fb1cbb1cc08cbd0d913a96dead89aa18289"
+  version = "v1.3.2"
+
+[[projects]]
   branch = "master"
   digest = "1:b521f10a2d8fa85c04a8ef4e62f2d1e14d303599a55d64dabf9f5a02f84d35eb"
   name = "golang.org/x/sync"
@@ -395,8 +403,10 @@
     "github.com/oklog/ulid",
     "github.com/olivere/elastic",
     "github.com/orcaman/concurrent-map",
+    "github.com/pkg/errors",
     "github.com/tinylib/msgp/msgp",
     "github.com/urfave/cli",
+    "go.uber.org/atomic",
     "golang.org/x/sync/errgroup",
   ]
   solver-name = "gps-cdcl"

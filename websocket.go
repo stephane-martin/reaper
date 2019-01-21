@@ -6,8 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"golang.org/x/sync/errgroup"
-	"net"
-	"net/http"
 	"time"
 )
 
@@ -23,19 +21,13 @@ func init() {
 	gin.DisableConsoleColor()
 }
 
-func ListenWebsocket(ctx context.Context, listenAddr, nsqdAddr string, logger Logger) error {
-	router := gin.Default()
+func WebsocketRoutes(ctx context.Context, router *gin.Engine, nsqdAddr string, logger Logger) {
 
-	router.GET("/status", func(c *gin.Context) {
-		c.Status(200)
-	})
-
-	g, lctx := errgroup.WithContext(ctx)
-
-	router.Any("/ws", func(c *gin.Context) {
+	router.Any("/stream", func(c *gin.Context) {
 		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
 			logger.Warn("Websocket upgrade failed", "error", err)
+			_ = c.AbortWithError(500, err)
 			return
 		}
 		err = WaitNSQD(ctx)
@@ -55,15 +47,19 @@ func ListenWebsocket(ctx context.Context, listenAddr, nsqdAddr string, logger Lo
 			}
 		}
 
-		g.Go(func() error {
-			return wsReader(conn)
-		})
+		g, lctx := errgroup.WithContext(ctx)
 
 		g.Go(func() error {
-			err := pullEntries(lctx, channel, channel, nsqdAddr, handler, logger)
+			err := pullEntries(lctx, channel, channel, nsqdAddr, handler, -1, 1, logger)
 			close(entries)
 			return err
 		})
+
+		g.Go(func() error {
+			_ = wsReader(conn)
+			return nil
+		})
+
 		g.Go(func() error {
 			err := wsWriter(lctx, conn, entries)
 			_ = conn.Close()
@@ -76,20 +72,6 @@ func ListenWebsocket(ctx context.Context, listenAddr, nsqdAddr string, logger Lo
 		}
 	})
 
-	listener, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		return err
-	}
-	go func() {
-		<-ctx.Done()
-		_ = g.Wait()
-		_ = listener.Close()
-	}()
-	err = http.Serve(listener, router)
-	if err != nil {
-		logger.Debug("Websocket returned", "error", err)
-	}
-	return nil
 }
 
 
