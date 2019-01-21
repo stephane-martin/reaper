@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/sync/errgroup"
 	"io"
 	"net/http"
@@ -47,6 +48,19 @@ func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAd
 	router.GET("/status", func(c *gin.Context) {
 		c.Status(200)
 	})
+
+	router.Any("/metrics", gin.WrapH(
+		promhttp.HandlerFor(
+			Metrics.Registry,
+			promhttp.HandlerOpts{
+				DisableCompression:  true,
+				ErrorLog:            AdaptLoggerPrometheus(logger),
+				ErrorHandling:       promhttp.HTTPErrorOnError,
+				MaxRequestsInFlight: -1,
+				Timeout:             -1,
+			},
+		),
+	))
 
 	router.DELETE("/download/:clientid", func(c *gin.Context) {
 		clientID := c.Param("clientid")

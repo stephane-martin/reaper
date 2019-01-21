@@ -91,6 +91,7 @@ func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, h Handl
 	)
 	daemon.Main()
 	nsqdReady()
+	Metrics.Registry.MustRegister(NewNSQDCollector(daemon))
 
 	g, lctx := errgroup.WithContext(ctx)
 

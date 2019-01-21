@@ -27,6 +27,7 @@ func listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Forma
 			s := WithContext(lctx, bufio.NewScanner(os.Stdin))
 			L:
 			for s.Scan() {
+				Metrics.Incoming.WithLabelValues("", "stdin").Inc()
 				e := NewEntry()
 				err := ParseAccessLogLine(f, s.Text(), e, l)
 				if err != nil {
@@ -95,6 +96,7 @@ func listenTCP(ctx context.Context, tcp []string, f Format, useRFC5424 bool, ent
 				if err != nil {
 					return err
 				}
+				Metrics.SyslogConnections.WithLabelValues(conn.RemoteAddr().String()).Inc()
 				g.Go(func() error {
 					<-lctx.Done()
 					_ = conn.Close()
@@ -126,6 +128,7 @@ func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, en
 				if res.Message.Message() == nil {
 					return
 				}
+				Metrics.Incoming.WithLabelValues(conn.RemoteAddr().String(), "tcp").Inc()
 				msg := strings.TrimSpace(*res.Message.Message())
 				if msg == "" {
 					return
@@ -153,6 +156,7 @@ func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, en
 	}
 	scanner := WithContext(ctx, bufio.NewScanner(conn))
 	for scanner.Scan() {
+		Metrics.Incoming.WithLabelValues(conn.RemoteAddr().String(), "tcp").Inc()
 		entry, err := parseRFC3164(scanner.Bytes(), f, l)
 		if err != nil {
 			l.Info("Failed to parse TCP/RFC3164 message", "error", err)
@@ -237,6 +241,7 @@ func handleUDP(ctx context.Context, conn net.PacketConn, f Format, useRFC5424 bo
 	for {
 		n, addr, err = conn.ReadFrom(buf)
 		if n > 0 {
+			Metrics.Incoming.WithLabelValues(addr.String(), "udp").Inc()
 			if useRFC5424 {
 				entry, pErr = parseRFC5424(buf[:n], f, l)
 				if pErr != nil {

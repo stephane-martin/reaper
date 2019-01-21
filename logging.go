@@ -8,6 +8,7 @@ import (
 	"github.com/inconshreveable/log15"
 	"github.com/nsqio/nsq/nsqd"
 	"github.com/olivere/elastic"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"log"
 	"strings"
 )
@@ -30,6 +31,14 @@ type adaptedErrorElastic struct {
 
 type adaptedInfoElastic struct {
 	Logger
+}
+
+type adaptedPrometheus struct {
+	Logger
+}
+
+func (a adaptedPrometheus) Println(v ...interface{}) {
+	a.Logger.Error(fmt.Sprintln(v...))
 }
 
 func (l adaptedErrorElastic) Printf(format string, v ...interface{}) {
@@ -67,6 +76,14 @@ func AdaptErrorLoggerElasticsearch(l Logger) elastic.Logger {
 func AdaptInfoLoggerElasticsearch(l Logger) elastic.Logger {
 	return adaptedInfoElastic{Logger: l}
 }
+
+
+func AdaptLoggerPrometheus(l Logger) promhttp.Logger {
+	return &adaptedPrometheus{
+		Logger: l,
+	}
+}
+
 
 func (l adaptedNSQD) Output(maxDepth int, s string) error {
 	if len(s) < 5 {
