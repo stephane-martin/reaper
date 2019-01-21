@@ -13,13 +13,16 @@ import (
 	"github.com/nsqio/go-nsq"
 	"github.com/olivere/elastic"
 	"github.com/orcaman/concurrent-map"
+	"github.com/streadway/amqp"
 	"github.com/urfave/cli"
+	utomic "go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -38,14 +41,27 @@ func listenSignals(cancel context.CancelFunc) {
 	}()
 }
 
-type kafkaProducer struct {
+type KafkaProducer struct {
 	sarama.AsyncProducer
 	closedOnce *sync.Once
 }
 
-func (p kafkaProducer) AsyncClose() {
+func (p KafkaProducer) AsyncClose() {
 	p.closedOnce.Do(func() { p.AsyncProducer.AsyncClose() })
 }
+
+type RabbitMQChannel struct {
+	Channel *amqp.Channel
+	Callbacks cmap.ConcurrentMap
+	Current utomic.Uint64
+}
+
+type ElasticProcessor struct {
+	Processor *elastic.BulkProcessor
+	Callbacks cmap.ConcurrentMap
+}
+
+var NotConnectedError = errors.New("not connected to destination")
 
 func BuildApp() *cli.App {
 	app := cli.NewApp()
@@ -72,8 +88,8 @@ func BuildApp() *cli.App {
 			EnvVar: "REAPER_UDP_ADDRESS",
 		},
 		cli.BoolFlag{
-			Name: "rfc5424",
-			Usage: "when receiving with syslog, use RFC5424 format",
+			Name:   "rfc5424",
+			Usage:  "when receiving with syslog, use RFC5424 format",
 			EnvVar: "REAPER_RFC5424",
 		},
 		cli.BoolFlag{
@@ -112,16 +128,22 @@ func BuildApp() *cli.App {
 			EnvVar: "REAPER_ACCESS_LOG_FORMAT",
 		},
 		cli.StringFlag{
-			Name: "websocket-address",
-			Usage: "listen address for the websocket service (eg '127.0.0.1:8080', leave empty to disable)",
-			Value: "",
+			Name:   "websocket-address",
+			Usage:  "listen address for the websocket service (eg '127.0.0.1:8080', leave empty to disable)",
+			Value:  "",
 			EnvVar: "REAPER_WEBSOCKET_ADDRESS",
 		},
 		cli.StringFlag{
-			Name: "http-address",
-			Usage: "listen address for the websocket service (eg '127.0.0.1:8080', leave empty to disable)",
-			Value: "",
+			Name:   "http-address",
+			Usage:  "listen address for the websocket service (eg '127.0.0.1:8080', leave empty to disable)",
+			Value:  "",
 			EnvVar: "REAPER_HTTP_ADDRESS",
+		},
+		cli.IntFlag{
+			Name:   "max-inflight",
+			Usage:  "maximum number of concurrent messages that will be sent downstream to destinations",
+			Value:  1000,
+			EnvVar: "REAPER_MAX_INFLIGHT",
 		},
 	}
 
@@ -149,14 +171,196 @@ func BuildApp() *cli.App {
 			},
 		},
 		{
-			Name: "rabbitmq",
+			Name:  "rabbitmq",
 			Usage: "write access logs to rabbitmq",
 			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:   "uri",
+					Usage:  "rabbitmq connection uri",
+					Value:  "amqp://guest:guest@localhost:5672/",
+					EnvVar: "REAPER_RABBITMQ_URI",
+				},
+				cli.StringFlag{
+					Name:   "exchange",
+					Usage:  "rabbitmq exchange to publish to",
+					Value:  "",
+					EnvVar: "REAPER_RABBITMQ_EXCHANGE",
+				},
+				cli.StringFlag{
+					Name:   "type",
+					Usage:  "rabbitmq exchange type",
+					Value:  "direct",
+					EnvVar: "REAPER_RABBITMQ_EXCHANGE_TYPE",
+				},
+				cli.StringFlag{
+					Name:  "routing-key",
+					Usage: "rabbitmq routing key",
+					Value: "reaper",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				logger := NewLogger(c.GlobalString("loglevel"))
+				ctx, cancel := context.WithCancel(context.Background())
+				listenSignals(cancel)
+				g, lctx := errgroup.WithContext(ctx)
+
+				uri := c.String("uri")
+				exchangeName := c.String("exchange")
+				exchangeType := c.String("type")
+				routingKey := c.String("routing-key")
+				maxInFlight := c.GlobalInt("max-inflight")
+				if maxInFlight <= 0 {
+					maxInFlight = 1000
+				}
+
+				var channelRef atomic.Value
+
+				getChannel := func() *RabbitMQChannel {
+					p := channelRef.Load()
+					if p == nil {
+						return nil
+					}
+					return p.(*RabbitMQChannel)
+				}
+
+				closeChannel := func() {
+					p := getChannel()
+					if p != nil {
+						_ = p.Channel.Close()
+					}
+				}
+
+				defer closeChannel()
+
+				reconnect := func() error {
+					closeChannel()
+
+					conn, err := amqp.Dial(uri)
+					if err != nil {
+						return err
+					}
+
+					channel, err := conn.Channel()
+					if err != nil {
+						return err
+					}
+
+					if exchangeName != "" {
+						err := channel.ExchangeDeclare(
+							exchangeName,
+							exchangeType,
+							true,
+							false,
+							false,
+							false,
+							nil,
+						)
+						if err != nil {
+							return err
+						}
+					}
+
+					err = channel.Confirm(false)
+					if err != nil {
+						return err
+					}
+
+					callbacks := cmap.New()
+					confirmations := make(chan amqp.Confirmation, maxInFlight+1)
+					channel.NotifyPublish(confirmations)
+
+					g.Go(func() error {
+						for {
+							select {
+							case confirm, ok := <-confirmations:
+								if !ok {
+									return nil
+								}
+								ack, ok := callbacks.Pop(strconv.FormatUint(confirm.DeliveryTag, 10))
+								if !ok {
+									return fmt.Errorf("can't find callback for rabbitmq delivery tag: %d", confirm.DeliveryTag)
+								} else {
+									//logger.Debug("RabbitMQ confirmation", "tag", confirm.DeliveryTag)
+									if confirm.Ack {
+										ack.(func(error))(nil)
+									} else {
+										ack.(func(error))(fmt.Errorf("delivery to rabbitmq failed for tag: %d", confirm.DeliveryTag))
+									}
+								}
+							case <-lctx.Done():
+								return nil
+							}
+						}
+					})
+
+					closes := make(chan *amqp.Error, 1)
+					channel.NotifyClose(closes)
+
+					g.Go(func() error {
+						for {
+							select {
+							case cl, ok := <-closes:
+								if !ok {
+									return nil
+								}
+								logger.Info("RabbitMQ broker notified closing", "error", cl.Error())
+								return nil
+							case <-lctx.Done():
+								return nil
+							}
+						}
+					})
+
+					channelRef.Store(&RabbitMQChannel{
+						Channel: channel,
+						Callbacks: callbacks,
+					})
+					return nil
+				}
+
+				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
+					ch := getChannel()
+					if ch == nil {
+						return NotConnectedError
+					}
+					b := entry.JSON()
+					if b == nil {
+						ack(nil)
+						return nil
+					}
+
+					currentTag := strconv.FormatUint(ch.Current.Inc(), 10)
+					ch.Callbacks.Set(currentTag, ack)
+
+					msg := amqp.Publishing{
+						ContentType: "application/json",
+						ContentEncoding: "utf-8",
+						DeliveryMode: amqp.Transient,
+						MessageId: entry.UID,
+						Timestamp: time.Now(),
+						Type: "accesslog",
+						AppId: "reaper",
+						Body: b,
+					}
+
+					//logger.Debug("Push to rabbitmq", "uid", entry.UID, "tag", currentTag)
+
+					return ch.Channel.Publish(
+						exchangeName,
+						routingKey,
+						false,
+						false,
+						msg,
+					)
+				}
+
+				return action(lctx, g, c, h, reconnect, logger)
+
 			},
 		},
 		{
 			Name:  "elasticsearch",
-			Usage: "write access logs to elaticsearch",
+			Usage: "write access logs to Elasticsearch",
 			Flags: []cli.Flag{
 				cli.StringSliceFlag{
 					Name:   "url",
@@ -197,27 +401,20 @@ func BuildApp() *cli.App {
 				}
 				defer esClient.Stop()
 
-				callbacks := cmap.New()
-				doAck := func(uid string, err error) {
-					if v, ok := callbacks.Pop(uid); ok {
-						v.(func(error))(err)
-					}
-				}
-
 				var processorRef atomic.Value
 
-				getProcessor := func() *elastic.BulkProcessor {
+				getProcessor := func() *ElasticProcessor {
 					p := processorRef.Load()
 					if p == nil {
 						return nil
 					}
-					return p.(*elastic.BulkProcessor)
+					return p.(*ElasticProcessor)
 				}
 
 				closeProcessor := func() {
 					p := getProcessor()
 					if p != nil {
-						_ = p.Close()
+						_ = p.Processor.Close()
 					}
 				}
 
@@ -232,6 +429,16 @@ func BuildApp() *cli.App {
 					}
 					if resp.Status != "green" && resp.Status != "yellow" {
 						return fmt.Errorf("elasticsearch cluster status is not green/yellow: '%s'", resp.Status)
+					}
+
+					callbacks := cmap.New()
+					doAck := func(uid string, err error) {
+						v, ok := callbacks.Pop(uid)
+						if !ok {
+							logger.Error("Can't find callback for Elasticsearch entry", "uid", uid)
+						} else {
+							v.(func(error))(err)
+						}
 					}
 
 					after := func(executionId int64, _ []elastic.BulkableRequest, resp *elastic.BulkResponse, err error) {
@@ -279,14 +486,17 @@ func BuildApp() *cli.App {
 						return err
 					}
 
-					processorRef.Store(processor)
+					processorRef.Store(&ElasticProcessor{
+						Processor: processor,
+						Callbacks: callbacks,
+					})
 					return nil
 				}
 
 				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
 					p := getProcessor()
 					if p == nil {
-						return errors.New("not connected to Elasticsearch")
+						return NotConnectedError
 					}
 					b := entry.JSON()
 					if b == nil {
@@ -294,7 +504,9 @@ func BuildApp() *cli.App {
 						return nil
 					}
 
-					p.Add(
+					p.Callbacks.Set(entry.UID, ack)
+
+					p.Processor.Add(
 						elastic.NewBulkIndexRequest().
 							Index(indexName).
 							Type(indexName).
@@ -302,7 +514,7 @@ func BuildApp() *cli.App {
 							Doc(json.RawMessage(b)),
 					)
 
-					callbacks.Set(entry.UID, ack)
+
 					return nil
 				}
 
@@ -449,11 +661,11 @@ func BuildApp() *cli.App {
 				reconnect := func() error {
 					p := producer.Load()
 					if p != nil {
-						p.(kafkaProducer).AsyncClose()
+						p.(KafkaProducer).AsyncClose()
 					}
 					p2, err := sarama.NewAsyncProducer(brokers, config)
 					if err != nil {
-						return cli.NewExitError(err.Error(), 1)
+						return err
 					}
 					succ := p2.Successes()
 					errs := p2.Errors()
@@ -480,7 +692,7 @@ func BuildApp() *cli.App {
 							}
 						}
 					})
-					producer.Store(kafkaProducer{
+					producer.Store(KafkaProducer{
 						AsyncProducer: p2,
 						closedOnce:    &sync.Once{},
 					})
@@ -490,7 +702,7 @@ func BuildApp() *cli.App {
 				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
 					p := producer.Load()
 					if p == nil {
-						return errors.New("not connected to kafka")
+						return NotConnectedError
 					}
 					b := entry.JSON()
 					if b == nil {
@@ -508,7 +720,7 @@ func BuildApp() *cli.App {
 					select {
 					case <-done:
 						return context.Canceled
-					case p.(kafkaProducer).Input() <- msg:
+					case p.(KafkaProducer).Input() <- msg:
 						return nil
 					}
 				}
@@ -585,10 +797,6 @@ func BuildApp() *cli.App {
 	return app
 }
 
-func main() {
-	_ = BuildApp().Run(os.Args)
-}
-
 func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, reconnect func() error, logger Logger) (err error) {
 	defer func() {
 		if err != nil {
@@ -613,6 +821,7 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	useRFC5424 := c.GlobalBool("rfc5424")
 	websocketAddr := c.GlobalString("websocket-address")
 	httpAddr := c.GlobalString("http-address")
+	maxInFlight := c.GlobalInt("max-inflight")
 
 	var httpRoutes, websocketRoutes *gin.Engine
 	var httpListener, websocketListener net.Listener
@@ -645,7 +854,7 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	}
 
 	g.Go(func() error {
-		return NSQD(ctx, nsqdOpts, incoming, h, reconnect, logger)
+		return NSQD(ctx, nsqdOpts, incoming, h, reconnect, maxInFlight, logger)
 	})
 
 	g.Go(func() error {
@@ -726,4 +935,8 @@ func actionWriter(c *cli.Context, w io.Writer, gzipEnabled bool, gzipLevel int) 
 		return err
 	}
 	return action(lctx, g, c, handler, nil, logger)
+}
+
+func main() {
+	_ = BuildApp().Run(os.Args)
 }

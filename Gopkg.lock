@@ -323,6 +323,14 @@
   revision = "3113b8401b8a98917cde58f8bbd42a1b1c03b1fd"
 
 [[projects]]
+  branch = "master"
+  digest = "1:525ac3364813b4688df380594e562133e07830dfce0722effda64b37634c13d0"
+  name = "github.com/streadway/amqp"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "a314942b2fd9dde7a3f70ba3f1062848ce6eb392"
+
+[[projects]]
   digest = "1:c97e8a5e5c435c3287f581cdb4441ba34577ec6ead8422bfedafa6269af7abf6"
   name = "github.com/tinylib/msgp"
   packages = ["msgp"]
@@ -404,6 +412,7 @@
     "github.com/olivere/elastic",
     "github.com/orcaman/concurrent-map",
     "github.com/pkg/errors",
+    "github.com/streadway/amqp",
     "github.com/tinylib/msgp/msgp",
     "github.com/urfave/cli",
     "go.uber.org/atomic",

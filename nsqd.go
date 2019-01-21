@@ -78,7 +78,11 @@ func WaitNSQD(ctx context.Context) error {
 	}
 }
 
-func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, h Handler, reconnect func() error, logger Logger) error {
+func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, h Handler, reconnect func() error, maxInFlight int, logger Logger) error {
+	if maxInFlight <= 0 {
+		maxInFlight = 1000
+	}
+
 	daemon := nsqd.New(opts)
 	logger.Info("Starting embedded nsqd",
 		"tcp", opts.TCPAddress,
@@ -97,7 +101,7 @@ func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, h Handl
 	if h != nil {
 		g.Go(func() error {
 			for {
-				err := pullEntries(lctx, "reaper_puller", "reaper_puller", opts.TCPAddress, h, -1, 1000, logger)
+				err := pullEntries(lctx, "reaper_puller", "reaper_puller", opts.TCPAddress, h, -1, maxInFlight, logger)
 				if err == nil || err == context.Canceled {
 					return context.Canceled
 				}
@@ -170,7 +174,7 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 		if returned == h.maxEntries {
 			h.markError(PullFinished)
 		} else if returned > h.maxEntries {
-			message.RequeueWithoutBackoff(0)
+			message.Requeue(0)
 			h.markError(PullFinished)
 			return PullFinished
 		}
@@ -193,7 +197,9 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 		}
 	})
 	h.markError(err)
-	if err != nil {
+	if err == NotConnectedError {
+		message.Requeue(0)
+	} else if err != nil {
 		message.Requeue(-1)
 	}
 	return err
