@@ -744,14 +744,22 @@ func BuildApp() *cli.App {
 					Value:  "reaper",
 					EnvVar: "REAPER_TO_NSQD_TOPIC",
 				},
+				cli.BoolFlag{
+					Name: "json",
+					Usage: "publish messages in JSON format",
+					EnvVar: "REAPER_TO_NSQD_JSON",
+				},
 			},
 			Action: func(c *cli.Context) error {
 				logger := NewLogger(c.GlobalString("loglevel"))
 				ctx, cancel := context.WithCancel(context.Background())
 				listenSignals(cancel)
+
 				g, lctx := errgroup.WithContext(ctx)
+
 				tcpAddress := c.String("addr")
 				topic := c.String("topic")
+				exportJSON := c.Bool("json")
 
 				cfg := nsq.NewConfig()
 				cfg.ClientID = "reaper_nsq_to_nsq"
@@ -778,10 +786,22 @@ func BuildApp() *cli.App {
 				})
 				p.SetLogger(AdaptLoggerNSQD(logger), nsq.LogLevelInfo)
 				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
-					b := entry.JSON()
-					if b == nil {
-						ack(nil)
-						return nil
+					var (
+						b []byte
+						err error
+					)
+					if exportJSON {
+						b = entry.JSON()
+						if b == nil {
+							ack(nil)
+							return nil
+						}
+					} else {
+						b, err = entry.MarshalMsg(nil)
+						if err != nil {
+							ack(nil)
+							return nil
+						}
 					}
 					return p.PublishAsync(topic, b, doneChan, ack)
 				}
