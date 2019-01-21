@@ -79,12 +79,12 @@ func BuildApp() *cli.App {
 		},
 		cli.StringSliceFlag{
 			Name:   "tcp",
-			Usage:  "tcp address to listen on (eg. 127.0.0.1:1514)",
+			Usage:  "listen to syslog/TCP on that address (eg. 127.0.0.1:1514, can be specified multiple times)",
 			EnvVar: "REAPER_TCP_ADDRESS",
 		},
 		cli.StringSliceFlag{
 			Name:   "udp",
-			Usage:  "tcp address to listen on (eg. 127.0.0.1:1514)",
+			Usage:  "listen to syslog/UDP on that address (eg. 127.0.0.1:1514, can be specified multiple times)",
 			EnvVar: "REAPER_UDP_ADDRESS",
 		},
 		cli.BoolFlag{
@@ -94,7 +94,7 @@ func BuildApp() *cli.App {
 		},
 		cli.BoolFlag{
 			Name:   "stdin",
-			Usage:  "receive logs on stdin",
+			Usage:  "receive raw access logs on stdin (useful for piping access logs from Apache)",
 			EnvVar: "REAPER_STDIN",
 		},
 		cli.StringFlag{
@@ -117,13 +117,13 @@ func BuildApp() *cli.App {
 		},
 		cli.StringFlag{
 			Name:   "embedded-nsqd-data-path",
-			Usage:  "data path for the embedded nsqd",
+			Usage:  "data path for the embedded nsqd (change to a non-volatile location)",
 			EnvVar: "REAPER_EMB_NSQD_DATA_PATH",
 			Value:  "/tmp/reaper/nsqd",
 		},
 		cli.StringFlag{
 			Name:   "format",
-			Usage:  "access log format [json, kv, apache_combined, apache_common, nginx_common]",
+			Usage:  "access log format [json, kv, combined, common]",
 			Value:  "json",
 			EnvVar: "REAPER_ACCESS_LOG_FORMAT",
 		},
@@ -165,7 +165,7 @@ func BuildApp() *cli.App {
 		},
 		{
 			Name:  "stderr",
-			Usage: "write access logs to stdout",
+			Usage: "write access logs to stderr",
 			Action: func(c *cli.Context) error {
 				return actionWriter(c, os.Stderr, false, 0)
 			},
