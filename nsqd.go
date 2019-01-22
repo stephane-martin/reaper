@@ -307,7 +307,7 @@ func pushEntries(ctx context.Context, tcpAddress string, entries <-chan *Entry, 
 				}
 				b, err := MarshalEntry(entry)
 				if err != nil {
-					logger.Warn("Failed to messagepack-encode entry", "error", err)
+					logger.Warn("Failed to message-pack encode entry", "error", err)
 				} else if b != nil {
 					err := p.PublishAsync("embedded", b, doneChan)
 					if err != nil {

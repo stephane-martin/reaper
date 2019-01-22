@@ -51,9 +51,9 @@ func (p KafkaProducer) AsyncClose() {
 }
 
 type RabbitMQChannel struct {
-	Channel *amqp.Channel
+	Channel   *amqp.Channel
 	Callbacks cmap.ConcurrentMap
-	Current utomic.Uint64
+	Current   utomic.Uint64
 }
 
 type ElasticProcessor struct {
@@ -312,7 +312,7 @@ func BuildApp() *cli.App {
 					})
 
 					channelRef.Store(&RabbitMQChannel{
-						Channel: channel,
+						Channel:   channel,
 						Callbacks: callbacks,
 					})
 					return nil
@@ -336,14 +336,14 @@ func BuildApp() *cli.App {
 					ch.Callbacks.Set(currentTag, ack)
 
 					msg := amqp.Publishing{
-						ContentType: "application/json",
+						ContentType:     "application/json",
 						ContentEncoding: "utf-8",
-						DeliveryMode: amqp.Transient,
-						MessageId: entry.UID,
-						Timestamp: time.Now(),
-						Type: "accesslog",
-						AppId: "reaper",
-						Body: b,
+						DeliveryMode:    amqp.Transient,
+						MessageId:       entry.UID,
+						Timestamp:       time.Now(),
+						Type:            "accesslog",
+						AppId:           "reaper",
+						Body:            b,
 					}
 
 					//logger.Debug("Push to rabbitmq", "uid", entry.UID, "tag", currentTag)
@@ -519,7 +519,6 @@ func BuildApp() *cli.App {
 							Id(entry.UID).
 							Doc(json.RawMessage(b)),
 					)
-
 
 					return nil
 				}
@@ -757,8 +756,8 @@ func BuildApp() *cli.App {
 					EnvVar: "REAPER_TO_NSQD_TOPIC",
 				},
 				cli.BoolFlag{
-					Name: "json",
-					Usage: "publish messages in JSON format",
+					Name:   "json",
+					Usage:  "publish messages in JSON format",
 					EnvVar: "REAPER_TO_NSQD_JSON",
 				},
 			},
@@ -799,7 +798,7 @@ func BuildApp() *cli.App {
 				p.SetLogger(AdaptLoggerNSQD(logger), nsq.LogLevelInfo)
 				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
 					var (
-						b []byte
+						b   []byte
 						err error
 					)
 					if exportJSON {
@@ -956,10 +955,35 @@ func actionWriter(c *cli.Context, w io.Writer, gzipEnabled bool, gzipLevel int) 
 		writer = bufw
 	}
 
+	var deadline atomic.Value
+	deadline.Store(time.Now().Add(time.Second))
+
+	// flush the buffered writer when there is no activity for one second
+	g.Go(func() error {
+		for {
+			if deadline.Load().(time.Time).Before(time.Now()) {
+				l.Lock()
+				err := bufw.Flush()
+				l.Unlock()
+				if err != nil {
+					return err
+				}
+			}
+			select {
+			case <-time.After(time.Second):
+			case <-lctx.Done():
+				return nil
+			}
+		}
+	})
+
 	handler := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
+		deadline.Store(time.Now().Add(time.Second))
+
 		b, err := JMarshalEntry(entry)
 		if err != nil {
-			return err
+			logger.Error("Failed to JSON-marshal entry", "error", err)
+			return nil
 		}
 		if b == nil {
 			ack(nil)
