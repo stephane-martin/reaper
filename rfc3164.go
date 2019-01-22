@@ -36,10 +36,10 @@ type RFC5424Message struct {
 }
 
 var (
-	NoPriorityError = errors.New("message does not have a priority field")
-	PriorityNotIntError = errors.New("the priority field is not an integer")
-	EmptyMessageError = errors.New("empty syslog message")
-	BadTimestampError = errors.New("invalid timestamp format")
+	ErrNoPriority     = errors.New("message does not have a priority field")
+	ErrPriorityNotInt = errors.New("the priority field is not an integer")
+	ErrEmptyMessage   = errors.New("empty syslog message")
+	ErrBadTimestamp   = errors.New("invalid timestamp format")
 )
 
 func p3164(m []byte) (*RFC5424Message, error) {
@@ -48,27 +48,27 @@ func p3164(m []byte) (*RFC5424Message, error) {
 	smsg := &RFC5424Message{}
 
 	if !bytes.HasPrefix(m, []byte("<")) {
-		return nil, NoPriorityError
+		return nil, ErrNoPriority
 	}
 	priEnd := bytes.Index(m, []byte(">"))
 	if priEnd <= 1 {
-		return nil, NoPriorityError
+		return nil, ErrNoPriority
 	}
 	priStr := m[1:priEnd]
 	priNum, err := strconv.Atoi(string(priStr))
 	if err != nil {
-		return nil, PriorityNotIntError
+		return nil, ErrPriorityNotInt
 	}
 	smsg.Priority = priNum
 	smsg.Facility = priNum / 8
 	smsg.Severity = priNum % 8
 
 	if len(m) <= (priEnd + 1) {
-		return nil, EmptyMessageError
+		return nil, ErrEmptyMessage
 	}
 	m = bytes.TrimSpace(m[priEnd+1:])
 	if len(m) == 0 {
-		return nil, EmptyMessageError
+		return nil, ErrEmptyMessage
 	}
 
 	s := bytes.Split(m, space)
@@ -79,24 +79,24 @@ func p3164(m []byte) (*RFC5424Message, error) {
 		if e != nil {
 			t2, e := time.Parse(time.RFC3339, s0)
 			if e != nil {
-				return nil, BadTimestampError
+				return nil, ErrBadTimestamp
 			}
 			smsg.Time = &t2
 		} else {
 			smsg.Time = &t1
 		}
 		if len(s) == 1 {
-			return nil, EmptyMessageError
+			return nil, ErrEmptyMessage
 		}
 		s = s[1:]
 	} else {
 		// old unix timestamp
 		if len(s) < 3 {
-			return nil, BadTimestampError
+			return nil, ErrBadTimestamp
 		}
 		t, e := time.ParseInLocation(time.Stamp, string(bytes.Join(s[0:3], space)), time.Local)
 		if e != nil {
-			return nil, BadTimestampError
+			return nil, ErrBadTimestamp
 		}
 		t = t.AddDate(time.Now().Year(), 0, 0)
 
@@ -108,7 +108,7 @@ func p3164(m []byte) (*RFC5424Message, error) {
 	}
 
 	if len(s) == 1 {
-		return nil, EmptyMessageError
+		return nil, ErrEmptyMessage
 	}
 
 	if len(s) == 2 {

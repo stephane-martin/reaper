@@ -173,7 +173,7 @@ func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, en
 	}
 	err := scanner.Err()
 	if err != nil {
-
+		l.Warn("Scanning error in TCP/RFC3164 stream", "error", err)
 	}
 	return nil
 }
@@ -186,7 +186,7 @@ func parseRFC5424(buf []byte, f Format, l Logger) (*Entry, error) {
 		return nil, err
 	}
 	if m.Message() == nil {
-		return nil, EmptyMessageError
+		return nil, ErrEmptyMessage
 	}
 
 	entry := NewEntry()
@@ -209,7 +209,7 @@ func parseRFC3164(buf []byte, f Format, l Logger) (*Entry, error) {
 		return nil, err
 	}
 	if m.Message == "" {
-		return nil, EmptyMessageError
+		return nil, ErrEmptyMessage
 	}
 
 	entry := NewEntry()

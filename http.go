@@ -122,7 +122,7 @@ func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAd
 		handler := func(done <-chan struct{}, e *Entry, ack func(error)) error {
 			select {
 			case <-done:
-				return PullFinished
+				return ErrPullFinished
 			case entries <- EntryACK{Entry: e, ACK: ack}:
 				return nil
 			}
@@ -133,7 +133,7 @@ func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAd
 		g.Go(func() error {
 			err := pullEntries(lctx, nsqClientID, channel, nsqdTCPAddr, handler, size, 1, logger)
 			close(entries)
-			if err == PullFinished {
+			if err == ErrPullFinished {
 				return nil
 			}
 			return err

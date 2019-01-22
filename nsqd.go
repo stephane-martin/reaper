@@ -62,18 +62,14 @@ func buildNSQDOptions(c *cli.Context, l Logger) (*nsqd.Options, error) {
 	return opts, nil
 }
 
-var nsqdReadyCtx context.Context
-var nsqdReady context.CancelFunc
 
-func init() {
-	nsqdReadyCtx, nsqdReady = context.WithCancel(context.Background())
-}
+var nsqdReady = make(chan struct{})
 
 func WaitNSQD(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-nsqdReadyCtx.Done():
+	case <-nsqdReady:
 		return nil
 	}
 }
@@ -90,7 +86,7 @@ func NSQD(ctx context.Context, opts *nsqd.Options, incoming <-chan *Entry, h Han
 		"datapath", opts.DataPath,
 	)
 	daemon.Main()
-	nsqdReady()
+	close(nsqdReady)
 	Metrics.Registry.MustRegister(NewNSQDCollector(daemon))
 
 	g, lctx := errgroup.WithContext(ctx)
@@ -152,7 +148,7 @@ func (h *handler) markError(err error) {
 		return
 	}
 	h.once.Do(func() {
-		if err != PullFinished {
+		if err != ErrPullFinished {
 			h.logger.Warn("Failed to handle message", "error", err)
 		}
 
@@ -165,7 +161,7 @@ func (h *handler) markError(err error) {
 	})
 }
 
-var PullFinished = errors.New("pull finished")
+var ErrPullFinished = errors.New("pull finished")
 
 func (h *handler) HandleMessage(message *nsq.Message) error {
 	message.DisableAutoResponse()
@@ -173,11 +169,11 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 	if h.maxEntries != -1 {
 		returned := h.returned.Inc()
 		if returned == h.maxEntries {
-			h.markError(PullFinished)
+			h.markError(ErrPullFinished)
 		} else if returned > h.maxEntries {
 			message.Requeue(0)
-			h.markError(PullFinished)
-			return PullFinished
+			h.markError(ErrPullFinished)
+			return ErrPullFinished
 		}
 		h.logger.Debug("debug", "returned", returned)
 	}
@@ -197,7 +193,7 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 		}
 	})
 	h.markError(err)
-	if err == NotConnectedError {
+	if err == ErrNotConnected {
 		message.Requeue(0)
 	} else if err != nil {
 		message.Requeue(-1)

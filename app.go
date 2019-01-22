@@ -61,7 +61,7 @@ type ElasticProcessor struct {
 	Callbacks cmap.ConcurrentMap
 }
 
-var NotConnectedError = errors.New("not connected to destination")
+var ErrNotConnected = errors.New("not connected to destination")
 
 func BuildApp() *cli.App {
 	app := cli.NewApp()
@@ -279,13 +279,12 @@ func BuildApp() *cli.App {
 								ack, ok := callbacks.Pop(strconv.FormatUint(confirm.DeliveryTag, 10))
 								if !ok {
 									return fmt.Errorf("can't find callback for rabbitmq delivery tag: %d", confirm.DeliveryTag)
+								}
+								//logger.Debug("RabbitMQ confirmation", "tag", confirm.DeliveryTag)
+								if confirm.Ack {
+									ack.(func(error))(nil)
 								} else {
-									//logger.Debug("RabbitMQ confirmation", "tag", confirm.DeliveryTag)
-									if confirm.Ack {
-										ack.(func(error))(nil)
-									} else {
-										ack.(func(error))(fmt.Errorf("delivery to rabbitmq failed for tag: %d", confirm.DeliveryTag))
-									}
+									ack.(func(error))(fmt.Errorf("delivery to rabbitmq failed for tag: %d", confirm.DeliveryTag))
 								}
 							case <-lctx.Done():
 								return nil
@@ -321,7 +320,7 @@ func BuildApp() *cli.App {
 				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
 					ch := getChannel()
 					if ch == nil {
-						return NotConnectedError
+						return ErrNotConnected
 					}
 					b, err := JMarshalEntry(entry)
 					if err != nil {
@@ -499,7 +498,7 @@ func BuildApp() *cli.App {
 				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
 					p := getProcessor()
 					if p == nil {
-						return NotConnectedError
+						return ErrNotConnected
 					}
 					b, err := JMarshalEntry(entry)
 					if err != nil {
@@ -593,7 +592,7 @@ func BuildApp() *cli.App {
 				listenSignals(cancel)
 				g, lctx := errgroup.WithContext(ctx)
 				redisAddress := c.String("addr")
-				listname := c.String("listname")
+				listName := c.String("listname")
 				password := c.String("password")
 				database := c.Int("database")
 
@@ -614,7 +613,7 @@ func BuildApp() *cli.App {
 						ack(nil)
 						return nil
 					}
-					err = client.RPush(listname, b).Err()
+					err = client.RPush(listName, b).Err()
 					if err == nil {
 						ack(nil)
 					}
@@ -710,7 +709,7 @@ func BuildApp() *cli.App {
 				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
 					p := producer.Load()
 					if p == nil {
-						return NotConnectedError
+						return ErrNotConnected
 					}
 					b, err := JMarshalEntry(entry)
 					if err != nil {
