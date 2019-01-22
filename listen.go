@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Format, useRFC5424 bool, entries chan *Entry, l Logger) error {
+func Listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Format, useRFC5424 bool, entries chan<- *Entry, l Logger) error {
 	defer close(entries)
 	g, lctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
@@ -48,7 +48,7 @@ func listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Forma
 }
 
 
-func listenUDP(ctx context.Context, udp []string, f Format, useRFC5424 bool, entries chan *Entry, l Logger) error {
+func listenUDP(ctx context.Context, udp []string, f Format, useRFC5424 bool, entries chan<- *Entry, l Logger) error {
 	g, lctx := errgroup.WithContext(ctx)
 
 	for _, udpAddr := range udp {
@@ -75,7 +75,7 @@ func listenUDP(ctx context.Context, udp []string, f Format, useRFC5424 bool, ent
 	return nil
 }
 
-func listenTCP(ctx context.Context, tcp []string, f Format, useRFC5424 bool, entries chan *Entry, l Logger) error {
+func listenTCP(ctx context.Context, tcp []string, f Format, useRFC5424 bool, entries chan<- *Entry, l Logger) error {
 	g, lctx := errgroup.WithContext(ctx)
 
 	for _, tcpAddr := range tcp {
@@ -116,7 +116,7 @@ func listenTCP(ctx context.Context, tcp []string, f Format, useRFC5424 bool, ent
 }
 
 
-func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, entries chan *Entry, l Logger) error {
+func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, entries chan<- *Entry, l Logger) error {
 	if useRFC5424 {
 		p := nontransparent.NewParser(
 			syslog.WithBestEffort(),
@@ -228,7 +228,7 @@ func parseRFC3164(buf []byte, f Format, l Logger) (*Entry, error) {
 	return entry, nil
 }
 
-func handleUDP(ctx context.Context, conn net.PacketConn, f Format, useRFC5424 bool, entries chan *Entry, l Logger) error {
+func handleUDP(ctx context.Context, conn net.PacketConn, f Format, useRFC5424 bool, entries chan<- *Entry, l Logger) error {
 	buf := make([]byte, 65536)
 	var (
 		addr net.Addr

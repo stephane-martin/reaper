@@ -265,7 +265,14 @@ func parseJSON(content string, e *Entry, _ Logger) error {
 	}
 	for k, v := range fields {
 		if v != nil {
-			e.Set(k, v)
+			if s, ok := v.(string); ok {
+				s = strings.TrimSpace(s)
+				if s != "" && s != "-" && s != "_" {
+					e.Set(k, s)
+				}
+			} else {
+				e.Set(k, v)
+			}
 		}
 	}
 	return nil

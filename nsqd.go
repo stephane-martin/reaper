@@ -78,7 +78,7 @@ func WaitNSQD(ctx context.Context) error {
 	}
 }
 
-func NSQD(ctx context.Context, opts *nsqd.Options, incoming chan *Entry, h Handler, reconnect func() error, maxInFlight int, logger Logger) error {
+func NSQD(ctx context.Context, opts *nsqd.Options, incoming <-chan *Entry, h Handler, reconnect func() error, maxInFlight int, logger Logger) error {
 	if maxInFlight <= 0 {
 		maxInFlight = 1000
 	}
@@ -182,14 +182,13 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 		h.logger.Debug("debug", "returned", returned)
 	}
 
-	var entry Entry
-	_, err := entry.UnmarshalMsg(message.Body)
+	entry, err := UnmarshalEntry(message.Body)
 	if err != nil {
 		h.logger.Warn("Failed to messagepack-unmarshal entry from nsqd", "error", err)
 		message.Finish()
 		return nil
 	}
-	err = h.th(h.done, &entry, func(e error) {
+	err = h.th(h.done, entry, func(e error) {
 		h.markError(e)
 		if e == nil {
 			message.Finish()
@@ -256,7 +255,7 @@ func pullEntries(ctx context.Context, cID, chnl, nsqAddr string, h Handler, maxR
 	}
 }
 
-func pushEntries(ctx context.Context, tcpAddress string, entries chan *Entry, logger Logger) error {
+func pushEntries(ctx context.Context, tcpAddress string, entries <-chan *Entry, logger Logger) error {
 	cfg := nsq.NewConfig()
 	cfg.ClientID = "reaper_producer"
 	cfg.Snappy = true
@@ -265,14 +264,14 @@ func pushEntries(ctx context.Context, tcpAddress string, entries chan *Entry, lo
 		return err
 	}
 	p.SetLogger(AdaptLoggerNSQD(logger), nsq.LogLevelInfo)
-	logger.Info("Ping embedded NSQD")
+	logger.Info("Ping nsqd")
 	err = p.Ping()
 	if err != nil {
 		return err
 	}
-	logger.Info("Ping embedded NSQD OK")
+	logger.Info("Pong nsqd")
 	defer p.Stop()
-	logger.Info("Start publish messages to embedded NSQD")
+	logger.Info("Start publish to nsqd")
 
 	doneChan := make(chan *nsq.ProducerTransaction)
 
@@ -306,10 +305,10 @@ func pushEntries(ctx context.Context, tcpAddress string, entries chan *Entry, lo
 					entries = nil
 					continue L
 				}
-				b, err := entry.MarshalMsg(nil)
+				b, err := MarshalEntry(entry)
 				if err != nil {
 					logger.Warn("Failed to messagepack-encode entry", "error", err)
-				} else {
+				} else if b != nil {
 					err := p.PublishAsync("embedded", b, doneChan)
 					if err != nil {
 						return err

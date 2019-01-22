@@ -40,7 +40,7 @@ func validClientID(clientID string) bool {
 
 type EntryACK struct {
 	Entry *Entry
-	ACK func(error)
+	ACK   func(error)
 }
 
 func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAddr string, logger Logger) {
@@ -113,11 +113,9 @@ func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAd
 		}
 		waitDuration := time.Duration(wait) * time.Millisecond
 
-
 		channel := fmt.Sprintf("reaper_http_download_%s", clientID)
 		nsqClientID := fmt.Sprintf("reaper_http_download_%s", NewULID().String())
 		logger.Debug("HTTP Download", "clientID", clientID, "channel", channel, "size", size)
-
 
 		entries := make(chan EntryACK)
 
@@ -143,6 +141,7 @@ func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAd
 
 		g.Go(func() error {
 			rCtx := c.Request.Context()
+		L:
 			for {
 				select {
 				case <-lctx.Done():
@@ -155,18 +154,19 @@ func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAd
 					if !ok {
 						return nil
 					}
-					b := entryACK.Entry.JSON()
-					if b == nil {
+					entry := entryACK.Entry
+					b, err := JMarshalEntry(entry)
+					if b == nil || err != nil {
 						entryACK.ACK(nil)
-					} else {
-						b = append(b, '\n')
-						_, err := c.Writer.Write(b)
-						entryACK.ACK(err)
-						if err != nil {
-							return err
-						}
-						c.Writer.Flush()
+						continue L
 					}
+					b = append(b, '\n')
+					_, err = c.Writer.Write(b)
+					entryACK.ACK(err)
+					if err != nil {
+						return err
+					}
+					c.Writer.Flush()
 				}
 			}
 		})

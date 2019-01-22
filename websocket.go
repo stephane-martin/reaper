@@ -115,8 +115,8 @@ func wsWriter(ctx context.Context, conn *websocket.Conn, entries chan *Entry) er
 			if !ok {
 				entries = nil
 			} else {
-				b := entry.JSON()
-				if b != nil {
+				b, err := JMarshalEntry(entry)
+				if err == nil && b != nil {
 					err := conn.WriteMessage(websocket.TextMessage, b)
 					if err != nil {
 						return err

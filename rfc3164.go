@@ -94,12 +94,12 @@ func p3164(m []byte) (*RFC5424Message, error) {
 		if len(s) < 3 {
 			return nil, BadTimestampError
 		}
-		timestampBytes := bytes.Join(s[0:3], space)
-		t, e := time.Parse(time.Stamp, string(timestampBytes))
+		t, e := time.ParseInLocation(time.Stamp, string(bytes.Join(s[0:3], space)), time.Local)
 		if e != nil {
 			return nil, BadTimestampError
 		}
 		t = t.AddDate(time.Now().Year(), 0, 0)
+
 		smsg.Time = &t
 		if len(s) == 3 {
 			return smsg, nil

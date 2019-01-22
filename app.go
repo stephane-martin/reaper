@@ -323,7 +323,10 @@ func BuildApp() *cli.App {
 					if ch == nil {
 						return NotConnectedError
 					}
-					b := entry.JSON()
+					b, err := JMarshalEntry(entry)
+					if err != nil {
+						return err
+					}
 					if b == nil {
 						ack(nil)
 						return nil
@@ -498,7 +501,10 @@ func BuildApp() *cli.App {
 					if p == nil {
 						return NotConnectedError
 					}
-					b := entry.JSON()
+					b, err := JMarshalEntry(entry)
+					if err != nil {
+						return err
+					}
 					if b == nil {
 						ack(nil)
 						return nil
@@ -601,12 +607,15 @@ func BuildApp() *cli.App {
 				reconnect := func() error { return client.Ping().Err() }
 
 				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
-					b := entry.JSON()
+					b, err := JMarshalEntry(entry)
+					if err != nil {
+						return err
+					}
 					if b == nil {
 						ack(nil)
 						return nil
 					}
-					err := client.RPush(listname, b).Err()
+					err = client.RPush(listname, b).Err()
 					if err == nil {
 						ack(nil)
 					}
@@ -704,7 +713,10 @@ func BuildApp() *cli.App {
 					if p == nil {
 						return NotConnectedError
 					}
-					b := entry.JSON()
+					b, err := JMarshalEntry(entry)
+					if err != nil {
+						return err
+					}
 					if b == nil {
 						ack(nil)
 						return nil
@@ -791,14 +803,20 @@ func BuildApp() *cli.App {
 						err error
 					)
 					if exportJSON {
-						b = entry.JSON()
+						b, err = JMarshalEntry(entry)
+						if err != nil {
+							return err
+						}
 						if b == nil {
 							ack(nil)
 							return nil
 						}
 					} else {
-						b, err = entry.MarshalMsg(nil)
+						b, err = MarshalEntry(entry)
 						if err != nil {
+							return err
+						}
+						if b == nil {
 							ack(nil)
 							return nil
 						}
@@ -878,7 +896,7 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	})
 
 	g.Go(func() error {
-		return listen(ctx, tcpAddrs, udpAddrs, stdin, format, useRFC5424, incoming, logger)
+		return Listen(ctx, tcpAddrs, udpAddrs, stdin, format, useRFC5424, incoming, logger)
 	})
 
 	if httpListener != nil {
@@ -939,14 +957,17 @@ func actionWriter(c *cli.Context, w io.Writer, gzipEnabled bool, gzipLevel int) 
 	}
 
 	handler := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
-		b := entry.JSON()
+		b, err := JMarshalEntry(entry)
+		if err != nil {
+			return err
+		}
 		if b == nil {
 			ack(nil)
 			return nil
 		}
 		b = append(b, '\n')
 		l.Lock()
-		_, err := writer.Write(b)
+		_, err = writer.Write(b)
 		l.Unlock()
 		if err == nil {
 			ack(nil)

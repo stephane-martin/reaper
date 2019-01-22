@@ -35,7 +35,6 @@ ${BINARY}_debug: ${SOURCES} model_gen.go
 	CGO_ENABLED=0 go build -x -tags 'netgo osusergo' -o ${BINARY}_debug ${LDFLAGS} ${FULL}
 
 ${BINARY}: ${SOURCES} model_gen.go
-	dep ensure
 	CGO_ENABLED=0 go build -a -installsuffix nocgo -tags 'netgo osusergo' -o ${BINARY} ${LDFLAGS_RELEASE} ${FULL}
 
 retool:
