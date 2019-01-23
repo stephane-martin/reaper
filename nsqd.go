@@ -17,12 +17,12 @@ import (
 )
 
 func buildNSQDOptions(c *cli.Context, l Logger) (*nsqd.Options, error) {
-	listenAddr := c.GlobalString("embedded-nsqd-address")
-	tcpPort := c.GlobalInt("embedded-nsqd-tcp-port")
-	httpPort := c.GlobalInt("embedded-nsqd-http-port")
+	listenAddr := c.GlobalString("nsqd-address")
+	tcpPort := c.GlobalInt("nsqd-tcp-port")
+	httpPort := c.GlobalInt("nsqd-http-port")
 	opts := nsqd.NewOptions()
 	opts.Logger = AdaptLoggerNSQD(l)
-	opts.DataPath = c.GlobalString("embedded-nsqd-data-path")
+	opts.DataPath = c.GlobalString("data-path")
 	opts.BroadcastAddress = listenAddr
 	opts.TCPAddress = net.JoinHostPort(listenAddr, fmt.Sprintf("%d", tcpPort))
 	opts.HTTPAddress = net.JoinHostPort(listenAddr, fmt.Sprintf("%d", httpPort))

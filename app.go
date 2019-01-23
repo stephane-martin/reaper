@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"compress/gzip"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/Shopify/sarama"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis"
+	"github.com/lib/pq"
 	"github.com/nsqio/go-nsq"
 	"github.com/olivere/elastic"
 	"github.com/orcaman/concurrent-map"
@@ -23,6 +25,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -59,6 +62,11 @@ type RabbitMQChannel struct {
 type ElasticProcessor struct {
 	Processor *elastic.BulkProcessor
 	Callbacks cmap.ConcurrentMap
+}
+
+type PGEntries struct {
+	ACK    func(error)
+	Fields []interface{}
 }
 
 var ErrNotConnected = errors.New("not connected to destination")
@@ -98,25 +106,25 @@ func BuildApp() *cli.App {
 			EnvVar: "REAPER_STDIN",
 		},
 		cli.StringFlag{
-			Name:   "embedded-nsqd-address",
+			Name:   "nsqd-address",
 			Usage:  "bind address for the embedded nsqd",
 			EnvVar: "REAPER_EMB_NSQD_ADDR",
 			Value:  "127.0.0.1",
 		},
 		cli.IntFlag{
-			Name:   "embedded-nsqd-tcp-port",
+			Name:   "nsqd-tcp-port",
 			Usage:  "TCP port for the embedded nsqd",
 			EnvVar: "REAPER_EMB_NSQD_TCP_PORT",
 			Value:  4150,
 		},
 		cli.IntFlag{
-			Name:   "embedded-nsqd-http-port",
+			Name:   "nsqd-http-port",
 			Usage:  "HTTP port for the embedded nsqd",
 			EnvVar: "REAPER_EMB_NSQD_HTTP_PORT",
 			Value:  4151,
 		},
 		cli.StringFlag{
-			Name:   "embedded-nsqd-data-path",
+			Name:   "data-path",
 			Usage:  "data path for the embedded nsqd (change to a non-volatile location)",
 			EnvVar: "REAPER_EMB_NSQD_DATA_PATH",
 			Value:  "/tmp/reaper/nsqd",
@@ -168,6 +176,187 @@ func BuildApp() *cli.App {
 			Usage: "write access logs to stderr",
 			Action: func(c *cli.Context) error {
 				return actionWriter(c, os.Stderr, false, 0)
+			},
+		},
+		{
+			Name:  "pgsql",
+			Usage: "write access logs to pgsql",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name:   "uri",
+					Usage:  "pgsql connection URI",
+					Value:  "postgres://user:password@127.0.0.1/dbname",
+					EnvVar: "REAPER_PGSQL_URI",
+				},
+				cli.StringFlag{
+					Name:   "fields",
+					Usage:  "comma-separated list of fields (the fields must identical for the log lines and for the database table)",
+					Value:  "timestamp,method,scheme,host,server,uri,duration,length,status,sent,agent,remoteaddr,remoteuser",
+					EnvVar: "REAPER_PGSQL_FIELDS",
+				},
+				cli.StringFlag{
+					Name:   "table",
+					Usage:  "pgsql table name",
+					Value:  "reaper",
+					EnvVar: "REAPER_PGSQL_TABLE",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				logger := NewLogger(c.GlobalString("loglevel"))
+				ctx, cancel := context.WithCancel(context.Background())
+				listenSignals(cancel)
+				g, lctx := errgroup.WithContext(ctx)
+
+				connURI := c.String("uri")
+				table := pq.QuoteIdentifier(c.String("table"))
+
+				fieldNames := make([]string, 0)
+				for _, f := range strings.Split(c.String("fields"), ",") {
+					fieldNames = append(fieldNames, strings.TrimSpace(f))
+				}
+				// todo: validate fieldNames
+
+				makeQuery := func(fields []interface{}) (string, []interface{}) {
+					selectFieldNames := make([]string, 0, len(fieldNames))
+					selectedFields := make([]interface{}, 0, len(fields))
+					for i := range fieldNames {
+						if fields[i] != nil {
+							selectFieldNames = append(selectFieldNames, fieldNames[i])
+							selectedFields = append(selectedFields, fields[i])
+						}
+					}
+					into := fmt.Sprintf(
+						"%s(%s)",
+						table,
+						strings.Join(selectFieldNames, ","),
+					)
+					placeholders := make([]string, 0, len(selectFieldNames))
+					for i := range selectFieldNames {
+						placeholders = append(placeholders, "$"+strconv.Itoa(i+1))
+					}
+					values := strings.Join(placeholders, ",")
+					insert := fmt.Sprintf("INSERT INTO %s VALUES (%s)", into, values)
+					return insert, selectedFields
+				}
+
+
+
+
+				var dbRef atomic.Value
+				ch := make(chan PGEntries)
+
+				getDB := func() *sql.DB {
+					db := dbRef.Load()
+					if db == nil {
+						return nil
+					}
+					return db.(*sql.DB)
+				}
+
+				closeDB := func() error {
+					db := getDB()
+					if db == nil {
+						return nil
+					}
+					return db.Close()
+				}
+
+				reconnect := func() error {
+					_ = closeDB()
+					db, err := sql.Open("postgres", connURI)
+					if err != nil {
+						return err
+					}
+
+					g.Go(func() error {
+						deadline := time.Now().Add(time.Second)
+						entries := make([]PGEntries, 0, 0)
+						chEntries := ch
+
+					L:
+						for {
+							select {
+							case <-lctx.Done():
+								for _, e := range entries {
+									e.ACK(lctx.Err())
+								}
+								return nil
+							case <-time.After(5 * time.Second):
+								err := db.Ping()
+								if err != nil {
+									for _, e := range entries {
+										e.ACK(err)
+									}
+									return err
+								}
+							case e, ok := <-chEntries:
+								if !ok {
+									chEntries = nil
+								} else {
+									entries = append(entries, e)
+								}
+								if !ok || time.Now().After(deadline) || len(entries) >= 100 {
+									if len(entries) == 0 {
+										deadline = time.Now().Add(time.Second)
+										continue L
+									}
+									tx, err := db.BeginTx(lctx, &sql.TxOptions{ReadOnly: false, Isolation: sql.LevelReadCommitted})
+									if err != nil {
+										for _, e := range entries {
+											e.ACK(err)
+										}
+										return err
+									}
+
+									for _, e := range entries {
+										query, fields := makeQuery(e.Fields)
+										_, err := tx.ExecContext(lctx, query, fields...)
+										if err != nil {
+											_ = tx.Rollback()
+											for _, e := range entries {
+												e.ACK(err)
+											}
+											return err
+										}
+									}
+
+									err = tx.Commit()
+									if err != nil {
+										for _, e := range entries {
+											e.ACK(err)
+										}
+										return err
+									}
+									for _, e := range entries {
+										e.ACK(nil)
+									}
+									deadline = time.Now().Add(time.Second)
+									entries = entries[:0]
+								}
+
+							}
+						}
+
+					})
+
+					dbRef.Store(db)
+					return nil
+				}
+
+				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
+					if getDB() == nil {
+						return ErrNotConnected
+					}
+					select {
+					case <-done:
+						return context.Canceled
+					case ch <- PGEntries{ACK: ack, Fields: Fields(entry, fieldNames)}:
+						return nil
+					}
+				}
+
+				return action(lctx, g, c, h, reconnect, logger)
+
 			},
 		},
 		{

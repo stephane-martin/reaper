@@ -187,6 +187,17 @@
   revision = "299bdde78165d4ca4bc7d064d8d6a4f39ac6de8c"
 
 [[projects]]
+  digest = "1:8ef506fc2bb9ced9b151dafa592d4046063d744c646c1bbe801982ce87e4bc24"
+  name = "github.com/lib/pq"
+  packages = [
+    ".",
+    "oid",
+  ]
+  pruneopts = "UT"
+  revision = "4ded0e9383f75c197b3a2aaa6d590ac52df6fd79"
+  version = "v1.0.0"
+
+[[projects]]
   branch = "master"
   digest = "1:aa3d8d42865c42626b5c1add193692d045b3188b1479f0a0a88690d21fe20083"
   name = "github.com/mailru/easyjson"
@@ -468,6 +479,7 @@
     "github.com/influxdata/go-syslog",
     "github.com/influxdata/go-syslog/nontransparent",
     "github.com/influxdata/go-syslog/rfc5424",
+    "github.com/lib/pq",
     "github.com/nsqio/go-nsq",
     "github.com/nsqio/nsq/nsqd",
     "github.com/oklog/ulid",

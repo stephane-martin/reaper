@@ -11,11 +11,7 @@ type metrics struct {
 	Registry          *prometheus.Registry
 }
 
-var Metrics *metrics
-
-func init() {
-	Metrics = newMetrics()
-}
+var Metrics = newMetrics()
 
 func newMetrics() *metrics {
 	m := new(metrics)
@@ -58,6 +54,7 @@ type nsqdCollector struct {
 	channelMessage *prometheus.Desc
 	channelRequeue *prometheus.Desc
 	channelTimeout *prometheus.Desc
+	channelNbClients *prometheus.Desc
 
 	daemon *nsqd.NSQD
 }
@@ -137,6 +134,13 @@ func (c *nsqdCollector) Collect(ch chan<- prometheus.Metric) {
 				float64(chnl.TimeoutCount),
 				t.TopicName, chnl.ChannelName,
 			)
+
+			ch <- prometheus.MustNewConstMetric(
+				c.channelNbClients,
+				prometheus.GaugeValue,
+				float64(len(chnl.Clients)),
+				t.TopicName, chnl.ChannelName,
+			)
 		}
 	}
 }
@@ -145,14 +149,14 @@ func NewNSQDCollector(daemon *nsqd.NSQD) prometheus.Collector {
 	return &nsqdCollector{
 		depth: prometheus.NewDesc(
 			"nsqd_topic_depth",
-			"depth for each nsqd topic.",
+			"Depth for each nsqd topic.",
 			[]string{"topic"},
 			nil,
 		),
 
 		backendDepth: prometheus.NewDesc(
 			"nsqd_topic_backend_depth",
-			"backend depth for each nsqd topic.",
+			"Backend depth for each nsqd topic.",
 			[]string{"topic"},
 			nil,
 		),
@@ -166,49 +170,56 @@ func NewNSQDCollector(daemon *nsqd.NSQD) prometheus.Collector {
 
 		channelDepth: prometheus.NewDesc(
 			"nsqd_channel_depth",
-			"depth for each nsqd channel.",
+			"Depth for each nsqd channel.",
 			[]string{"topic", "channel"},
 			nil,
 		),
 
 		channelBackendDepth: prometheus.NewDesc(
 			"nsqd_channel_backend_depth",
-			"backend depth for each nsqd channel.",
+			"Backend depth for each nsqd channel.",
 			[]string{"topic", "channel"},
 			nil,
 		),
 
 		channelInFlight: prometheus.NewDesc(
 			"nsqd_channel_inflight",
-			"inflight message count for each nsqd channel.",
+			"Inflight message count for each nsqd channel.",
 			[]string{"topic", "channel"},
 			nil,
 		),
 
 		channelDeferred: prometheus.NewDesc(
 			"nsqd_channel_defered",
-			"defered message count for each nsqd channel.",
+			"Deferred message count for each nsqd channel.",
 			[]string{"topic", "channel"},
 			nil,
 		),
 
 		channelMessage: prometheus.NewDesc(
 			"nsqd_channel_messages",
-			"message count for each nsqd channel.",
+			"Message count for each nsqd channel.",
 			[]string{"topic", "channel"},
 			nil,
 		),
 
 		channelRequeue: prometheus.NewDesc(
 			"nsqd_channel_requeue",
-			"requeued message count for each nsqd channel.",
+			"Requeued message count for each nsqd channel.",
 			[]string{"topic", "channel"},
 			nil,
 		),
 
 		channelTimeout: prometheus.NewDesc(
 			"nsqd_channel_timeout",
-			"timeout message count for each nsqd channel.",
+			"Timeout message count for each nsqd channel.",
+			[]string{"topic", "channel"},
+			nil,
+		),
+
+		channelNbClients: prometheus.NewDesc(
+			"nsqd_channel_clients",
+			"Number of connected clients for each nsqd channel.",
 			[]string{"topic", "channel"},
 			nil,
 		),

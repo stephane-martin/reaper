@@ -48,6 +48,15 @@ func JMarshalEntry(e *Entry) ([]byte, error) {
 	return b, nil
 }
 
+func Fields(e *Entry, fields []string) []interface{} {
+	res := make([]interface{}, 0, len(fields))
+	for _, f := range fields {
+		res = append(res, e.Fields[f])
+	}
+	ReleaseEntry(e)
+	return res
+}
+
 func UnmarshalEntry(b []byte) (*Entry, error) {
 	if len(b) == 0 {
 		return nil, nil

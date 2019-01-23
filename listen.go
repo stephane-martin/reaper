@@ -40,7 +40,11 @@ func Listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Forma
 				case entries <- e:
 				}
 			}
-			return s.Err()
+			err := s.Err()
+			if err != nil {
+				l.Info("Error scanning stdin", "error", err)
+			}
+			return nil
 		})
 
 	}
@@ -55,16 +59,16 @@ func listenUDP(ctx context.Context, udp []string, f Format, useRFC5424 bool, ent
 		addr := udpAddr
 		l.Info("Listen on UDP", "addr", addr)
 		g.Go(func() error {
-			pconn, err := net.ListenPacket("udp", addr)
+			pConn, err := net.ListenPacket("udp", addr)
 			if err != nil {
 				return err
 			}
 			g.Go(func() error {
 				<-lctx.Done()
-				_ = pconn.Close()
+				_ = pConn.Close()
 				return lctx.Err()
 			})
-			return handleUDP(lctx, pconn, f, useRFC5424, entries, l)
+			return handleUDP(lctx, pConn, f, useRFC5424, entries, l)
 		})
 	}
 
