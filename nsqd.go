@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"sync"
@@ -85,6 +86,21 @@ func NSQD(ctx context.Context, opts *nsqd.Options, incoming <-chan *Entry, h Han
 		"http", opts.HTTPAddress,
 		"datapath", opts.DataPath,
 	)
+	i, err := os.Stat(opts.DataPath)
+	if err != nil {
+		return err
+	}
+	if !i.IsDir() {
+		return errors.New("data path is not a directory")
+	}
+	// test we have rights permissions in data path
+	tf, err := ioutil.TempFile(opts.DataPath, "reaper_temp_*")
+	if err != nil {
+		return err
+	}
+	_ = tf.Close()
+	_ = os.Remove(tf.Name())
+
 	daemon.Main()
 	close(nsqdReady)
 	Metrics.Registry.MustRegister(NewNSQDCollector(daemon))
@@ -124,7 +140,7 @@ func NSQD(ctx context.Context, opts *nsqd.Options, incoming <-chan *Entry, h Han
 			}
 		})
 	}
-	err := g.Wait()
+	err = g.Wait()
 	logger.Info("Stopping NSQD")
 	daemon.Exit()
 	logger.Info("Stopped NSQD")
