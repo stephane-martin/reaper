@@ -85,6 +85,11 @@ func BuildApp() *cli.App {
 			EnvVar: "REAPER_LOGLEVEL",
 			Value:  "info",
 		},
+		cli.BoolFlag{
+			Name: "syslog",
+			Usage: "log to syslog",
+			EnvVar: "REAPER_SYSLOG",
+		},
 		cli.StringSliceFlag{
 			Name:   "tcp",
 			Usage:  "listen to syslog/TCP on that address (eg. 127.0.0.1:1514, can be specified multiple times)",
@@ -156,7 +161,7 @@ func BuildApp() *cli.App {
 	}
 
 	app.Action = func(c *cli.Context) error {
-		logger := NewLogger(c.GlobalString("loglevel"))
+		logger := NewLogger(c)
 		ctx, cancel := context.WithCancel(context.Background())
 		listenSignals(cancel)
 		g, lctx := errgroup.WithContext(ctx)
@@ -202,7 +207,7 @@ func BuildApp() *cli.App {
 				},
 			},
 			Action: func(c *cli.Context) error {
-				logger := NewLogger(c.GlobalString("loglevel"))
+				logger := NewLogger(c)
 				ctx, cancel := context.WithCancel(context.Background())
 				listenSignals(cancel)
 				g, lctx := errgroup.WithContext(ctx)
@@ -291,7 +296,7 @@ func BuildApp() *cli.App {
 									for _, e := range entries {
 										e.ACK(err)
 									}
-									return err
+									return nil
 								}
 							case e, ok := <-chEntries:
 								if !ok {
@@ -309,7 +314,7 @@ func BuildApp() *cli.App {
 										for _, e := range entries {
 											e.ACK(err)
 										}
-										return err
+										return nil
 									}
 
 									for _, e := range entries {
@@ -320,7 +325,7 @@ func BuildApp() *cli.App {
 											for _, e := range entries {
 												e.ACK(err)
 											}
-											return err
+											return nil
 										}
 									}
 
@@ -329,7 +334,7 @@ func BuildApp() *cli.App {
 										for _, e := range entries {
 											e.ACK(err)
 										}
-										return err
+										return nil
 									}
 									for _, e := range entries {
 										e.ACK(nil)
@@ -392,7 +397,7 @@ func BuildApp() *cli.App {
 				},
 			},
 			Action: func(c *cli.Context) error {
-				logger := NewLogger(c.GlobalString("loglevel"))
+				logger := NewLogger(c)
 				ctx, cancel := context.WithCancel(context.Background())
 				listenSignals(cancel)
 				g, lctx := errgroup.WithContext(ctx)
@@ -570,7 +575,7 @@ func BuildApp() *cli.App {
 				},
 			},
 			Action: func(c *cli.Context) error {
-				logger := NewLogger(c.GlobalString("loglevel"))
+				logger := NewLogger(c)
 				ctx, cancel := context.WithCancel(context.Background())
 				listenSignals(cancel)
 				g, lctx := errgroup.WithContext(ctx)
@@ -780,7 +785,7 @@ func BuildApp() *cli.App {
 				},
 			},
 			Action: func(c *cli.Context) error {
-				logger := NewLogger(c.GlobalString("loglevel"))
+				logger := NewLogger(c)
 				ctx, cancel := context.WithCancel(context.Background())
 				listenSignals(cancel)
 				g, lctx := errgroup.WithContext(ctx)
@@ -833,7 +838,7 @@ func BuildApp() *cli.App {
 				},
 			},
 			Action: func(c *cli.Context) error {
-				logger := NewLogger(c.GlobalString("loglevel"))
+				logger := NewLogger(c)
 				sarama.Logger = AdaptLoggerSarama(logger)
 
 				ctx, cancel := context.WithCancel(context.Background())
@@ -954,7 +959,7 @@ func BuildApp() *cli.App {
 				},
 			},
 			Action: func(c *cli.Context) error {
-				logger := NewLogger(c.GlobalString("loglevel"))
+				logger := NewLogger(c)
 				ctx, cancel := context.WithCancel(context.Background())
 				listenSignals(cancel)
 
@@ -1124,7 +1129,7 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 }
 
 func actionWriter(c *cli.Context, w io.Writer, gzipEnabled bool, gzipLevel int) error {
-	logger := NewLogger(c.GlobalString("loglevel"))
+	logger := NewLogger(c)
 	ctx, cancel := context.WithCancel(context.Background())
 	listenSignals(cancel)
 	g, lctx := errgroup.WithContext(ctx)

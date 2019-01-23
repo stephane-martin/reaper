@@ -9,8 +9,12 @@ import (
 	"github.com/nsqio/nsq/nsqd"
 	"github.com/olivere/elastic"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/urfave/cli"
 	"log"
+	"log/syslog"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Logger struct {
@@ -124,16 +128,126 @@ func (l adaptedNSQD) Output(maxDepth int, s string) error {
 	return nil
 }
 
-func NewLogger(loglevel string) Logger {
+func syslogFormat() log15.Format {
+	return log15.FormatFunc(func(r *log15.Record) []byte {
+		var buf bytes.Buffer
+		buf.WriteString("msg=")
+		formatLogfmtValue(r.Msg, &buf)
+
+		for i := 0; i < len(r.Ctx); i += 2 {
+			k, ok := r.Ctx[i].(string)
+			if !ok {
+				continue
+			}
+			buf.WriteByte(' ')
+			buf.WriteString(k)
+			buf.WriteByte('=')
+			formatLogfmtValue(r.Ctx[i+1], &buf)
+		}
+		buf.WriteByte('\n')
+		return buf.Bytes()
+	})
+}
+
+func formatLogfmtValue(value interface{}, buf *bytes.Buffer) {
+	if value == nil {
+		buf.WriteString("nil")
+		return
+	}
+
+	if t, ok := value.(time.Time); ok {
+		buf.WriteString(t.Format(time.RFC3339))
+		return
+	}
+	switch v := value.(type) {
+	case bool:
+		buf.WriteString(strconv.FormatBool(v))
+	case float32:
+		buf.WriteString(strconv.FormatFloat(float64(v), 'f', 3, 64))
+	case float64:
+		buf.WriteString(strconv.FormatFloat(v, 'f', 3, 64))
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		buf.WriteString(fmt.Sprintf("%d", value))
+	case error:
+		escapeString(v.Error(), buf)
+	case fmt.Stringer:
+		escapeString(v.String(), buf)
+	case string:
+		escapeString(v, buf)
+	default:
+		escapeString(fmt.Sprintf("%+v", value), buf)
+	}
+}
+
+func escapeString(s string, buf *bytes.Buffer) {
+	needsQuotes := false
+	needsEscape := false
+	for _, r := range s {
+		if r <= ' ' || r == '=' || r == '"' {
+			needsQuotes = true
+		}
+		if r == '\\' || r == '"' || r == '\n' || r == '\r' || r == '\t' {
+			needsEscape = true
+		}
+	}
+	if needsEscape == false && needsQuotes == false {
+		buf.WriteString(s)
+		return
+	}
+	if needsQuotes {
+		buf.WriteByte('"')
+	}
+	for _, r := range s {
+		switch r {
+		case '\\', '"':
+			buf.WriteByte('\\')
+			buf.WriteByte(byte(r))
+		case '\n':
+			buf.WriteString("\\n")
+		case '\r':
+			buf.WriteString("\\r")
+		case '\t':
+			buf.WriteString("\\t")
+		default:
+			buf.WriteRune(r)
+		}
+	}
+	if needsQuotes {
+		buf.WriteByte('"')
+	}
+}
+
+
+func NewLogger(c *cli.Context) Logger {
+	loglevel := c.GlobalString("loglevel")
+	useSyslog := c.GlobalBool("syslog")
 	lvl, _ := log15.LvlFromString(loglevel)
 	logger := log15.New()
 
-	logger.SetHandler(
-		log15.LvlFilterHandler(
-			lvl,
-			log15.StderrHandler,
-		),
-	)
+	if useSyslog {
+		h, err := log15.SyslogHandler(
+			syslog.LOG_DAEMON | syslog.LOG_INFO,
+			"reaper",
+			syslogFormat(),
+		)
+		if err != nil {
+			panic(err)
+		}
+		logger.SetHandler(
+			log15.LvlFilterHandler(
+				lvl,
+				h,
+			),
+		)
+	} else {
+		logger.SetHandler(
+			log15.LvlFilterHandler(
+				lvl,
+				log15.StderrHandler,
+			),
+		)
+	}
+
 	initGinLogging(logger)
 	return Logger{Logger: logger}
 }
