@@ -267,6 +267,10 @@ func BuildApp() *cli.App {
 					if err != nil {
 						return err
 					}
+					err = db.Ping()
+					if err != nil {
+						return err
+					}
 
 					g.Go(func() error {
 						deadline := time.Now().Add(time.Second)
