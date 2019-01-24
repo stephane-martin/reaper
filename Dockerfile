@@ -16,8 +16,5 @@ COPY tini /
 RUN chmod a+x /tini
 RUN chmod a+x /home/reaper/reaper
 
-EXPOSE 1514/tcp
-
 USER reaper
-ENTRYPOINT ["/tini", "--"]
-CMD ["/home/reaper/reaper","--tcp","127.0.0.1:1514"]
+ENTRYPOINT ["/tini", "--", "/home/reaper/reaper"]

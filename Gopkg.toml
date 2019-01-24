@@ -66,9 +66,15 @@
     name = "github.com/lib/pq"
     version = "1.0.0"
 
+[[constraint]]
+    name = "github.com/elazarl/go-bindata-assetfs"
+    branch = "master"
+
+
 [[override]]
 	name = "github.com/golang/snappy"
 	branch = "master"
+
 
 [prune]
   go-tests = true

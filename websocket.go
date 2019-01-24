@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	assetfs "github.com/elazarl/go-bindata-assetfs"
 	"golang.org/x/sync/errgroup"
+	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 )
 
 var GinMode string
-var upgrader = websocket.Upgrader{}
+var up = websocket.Upgrader{}
 
 const pongWait = 60 * time.Second
 const pingPeriod = (pongWait * 9) / 10
@@ -21,10 +25,30 @@ func init() {
 	gin.DisableConsoleColor()
 }
 
+func staticRessources(router *gin.Engine, paths []string, subDirectory string) {
+	for _, p := range paths {
+		path := p
+		router.GET(path, func(c *gin.Context) {
+			http.FileServer(&assetfs.AssetFS{
+				Asset: func(path string) ([]byte, error) {
+					return Asset(filepath.Join(subDirectory, path))
+				},
+				AssetInfo: func(path string) (os.FileInfo, error) {
+					return AssetInfo(filepath.Join(subDirectory, path))
+				},
+				AssetDir: func(path string) ([]string, error) {
+					return AssetDir(filepath.Join(subDirectory, path))
+				},
+			}).ServeHTTP(c.Writer, c.Request)
+		})
+	}
+}
+
 func WebsocketRoutes(ctx context.Context, router *gin.Engine, nsqdAddr string, logger Logger) {
+	staticRessources(router, []string{"/stream.html"}, "static")
 
 	router.Any("/stream", func(c *gin.Context) {
-		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+		conn, err := up.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
 			logger.Warn("Websocket upgrade failed", "error", err)
 			_ = c.AbortWithError(500, err)
@@ -108,7 +132,7 @@ func wsWriter(ctx context.Context, conn *websocket.Conn, entries chan *Entry) er
 		case <-ctx.Done():
 			_ = conn.WriteMessage(
 				websocket.CloseMessage,
-				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+				websocket.FormatCloseMessage(websocket.CloseGoingAway, ""),
 			)
 			return nil
 		case entry, ok := <-entries:

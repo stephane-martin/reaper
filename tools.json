@@ -15,6 +15,10 @@
     {
       "Repository": "github.com/tinylib/msgp",
       "Commit": "af6442a0fcf6e2a1b824f70dd0c734f01e817751"
+    },
+    {
+      "Repository": "github.com/go-bindata/go-bindata/go-bindata",
+      "Commit": "41975c0ccc30077fd791b15b383818e805d0a57e"
     }
   ],
   "RetoolVersion": "1.3.7"

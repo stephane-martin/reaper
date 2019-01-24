@@ -73,6 +73,14 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:f4f6279cb37479954644babd8f8ef00584ff9fa63555d2c6718c1c3517170202"
+  name = "github.com/elazarl/go-bindata-assetfs"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "38087fe4dafb822e541b3f7955075cc1c30bd294"
+
+[[projects]]
+  branch = "master"
   digest = "1:36fe9527deed01d2a317617e59304eb2c4ce9f8a24115bcc5c2e37b3aee5bae4"
   name = "github.com/gin-contrib/sse"
   packages = ["."]
@@ -472,6 +480,7 @@
   analyzer-version = 1
   input-imports = [
     "github.com/Shopify/sarama",
+    "github.com/elazarl/go-bindata-assetfs",
     "github.com/gin-gonic/gin",
     "github.com/go-redis/redis",
     "github.com/gorilla/websocket",

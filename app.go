@@ -11,6 +11,7 @@ import (
 	"github.com/Shopify/sarama"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis"
+	"github.com/gorilla/websocket"
 	"github.com/lib/pq"
 	"github.com/nsqio/go-nsq"
 	"github.com/olivere/elastic"
@@ -181,6 +182,90 @@ func BuildApp() *cli.App {
 			Usage: "write access logs to stderr",
 			Action: func(c *cli.Context) error {
 				return actionWriter(c, os.Stderr, false, 0)
+			},
+		},
+		{
+			Name: "stream",
+			Usage: "connect to reaper service by websocket and stream received messages to stdout",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name: "websocket-addr",
+					Usage: "websocket address to connect to",
+					Value: "ws://127.0.0.1:8080/stream",
+					EnvVar: "REAPER_STREAM_WEBSOCKET",
+				},
+			},
+			Action: func(c *cli.Context) error {
+				logger := NewLogger(c)
+				ctx, cancel := context.WithCancel(context.Background())
+				listenSignals(cancel)
+				g, lctx := errgroup.WithContext(ctx)
+
+				addr := c.String("websocket-addr")
+				conn, _, err := websocket.DefaultDialer.DialContext(lctx, addr, nil)
+				if err != nil {
+					return cli.NewExitError(err.Error(), 1)
+				}
+				//noinspection GoUnhandledErrorResult
+				defer conn.Close()
+				messages := make(chan map[string]interface{})
+
+				g.Go(func() error {
+					<-lctx.Done()
+					_ = conn.WriteMessage(
+						websocket.CloseMessage,
+						websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+					)
+					return nil
+				})
+
+				g.Go(func() error {
+					defer close(messages)
+					for {
+						typ, b, err := conn.ReadMessage()
+						if err != nil {
+							return err
+						}
+						if typ == websocket.TextMessage {
+							msg := make(map[string]interface{})
+							err := json.Unmarshal(b, &msg)
+							if err != nil {
+								logger.Warn("Can't unmarshal message from server", "error", err)
+							} else {
+								select {
+								case <-lctx.Done():
+									return nil
+								case messages <- msg:
+								}
+							}
+						}
+					}
+				})
+
+				g.Go(func() error {
+					for {
+						select {
+						case msg, ok := <-messages:
+							if !ok {
+								return nil
+							}
+							b, _ := json.Marshal(msg)
+							if b != nil {
+								b = append(b, '\n')
+								_ , _= os.Stdout.Write(b)
+							}
+						case <-lctx.Done():
+							return nil
+						}
+					}
+				})
+
+				err = g.Wait()
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+					return cli.NewExitError(err.Error(), 1)
+				}
+				return nil
+
 			},
 		},
 		{
