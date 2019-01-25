@@ -1067,6 +1067,7 @@ func BuildApp() *cli.App {
 					logger.Error("failed to create external nsq producer", "error", err.Error())
 					return err
 				}
+				defer p.Stop()
 				doneChan := make(chan *nsq.ProducerTransaction)
 				g.Go(func() error {
 					done := doneChan
@@ -1084,6 +1085,7 @@ func BuildApp() *cli.App {
 					}
 				})
 				p.SetLogger(AdaptLoggerNSQD(logger), nsq.LogLevelInfo)
+
 				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
 					var (
 						b   []byte
@@ -1110,6 +1112,7 @@ func BuildApp() *cli.App {
 					}
 					return p.PublishAsync(topic, b, doneChan, ack)
 				}
+
 				reconnect := func() error {
 					logger.Info("Connecting to external nsqd")
 					return p.Ping()
