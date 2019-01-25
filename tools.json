@@ -19,6 +19,10 @@
     {
       "Repository": "github.com/go-bindata/go-bindata/go-bindata",
       "Commit": "41975c0ccc30077fd791b15b383818e805d0a57e"
+    },
+    {
+      "Repository": "github.com/buildkite/github-release",
+      "Commit": "fcccd113f8a667fddfe85b714b787b487dd8ce3a"
     }
   ],
   "RetoolVersion": "1.3.7"

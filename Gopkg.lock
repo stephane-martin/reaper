@@ -161,6 +161,17 @@
   version = "v1.8.0"
 
 [[projects]]
+  digest = "1:68d0b68641bd23577d60ab2eb3c7de71fb53ee72ee0998ea1108e3939dc99b5a"
+  name = "github.com/go-stomp/stomp"
+  packages = [
+    ".",
+    "frame",
+  ]
+  pruneopts = "UT"
+  revision = "8f2263be1add431d02e77a146c7a738e103b9ed5"
+  version = "v2.0.2"
+
+[[projects]]
   digest = "1:97df918963298c287643883209a2c3f642e6593379f97ab400c2a2e219ab647d"
   name = "github.com/golang/protobuf"
   packages = ["proto"]
@@ -542,6 +553,7 @@
     "github.com/elazarl/go-bindata-assetfs",
     "github.com/gin-gonic/gin",
     "github.com/go-redis/redis",
+    "github.com/go-stomp/stomp",
     "github.com/gorilla/websocket",
     "github.com/inconshreveable/log15",
     "github.com/influxdata/go-syslog",

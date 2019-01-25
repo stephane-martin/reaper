@@ -11,6 +11,7 @@ import (
 	"github.com/Shopify/sarama"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis"
+	"github.com/go-stomp/stomp"
 	"github.com/gorilla/websocket"
 	"github.com/lib/pq"
 	"github.com/nsqio/go-nsq"
@@ -87,8 +88,8 @@ func BuildApp() *cli.App {
 			Value:  "info",
 		},
 		cli.BoolFlag{
-			Name: "syslog",
-			Usage: "log to syslog",
+			Name:   "syslog",
+			Usage:  "log to syslog",
 			EnvVar: "REAPER_SYSLOG",
 		},
 		cli.StringSliceFlag{
@@ -160,8 +161,8 @@ func BuildApp() *cli.App {
 			EnvVar: "REAPER_MAX_INFLIGHT",
 		},
 		cli.StringSliceFlag{
-			Name: "filterout",
-			Usage: "filter out access log entries when the expression is true",
+			Name:   "filterout",
+			Usage:  "filter out access log entries when the expression is true",
 			EnvVar: "REAPER_FILTER_OUT",
 		},
 	}
@@ -190,13 +191,13 @@ func BuildApp() *cli.App {
 			},
 		},
 		{
-			Name: "stream",
+			Name:  "stream",
 			Usage: "connect to reaper service by websocket and stream received messages to stdout",
 			Flags: []cli.Flag{
 				cli.StringFlag{
-					Name: "websocket-addr",
-					Usage: "websocket address to connect to",
-					Value: "ws://127.0.0.1:8080/stream",
+					Name:   "websocket-addr",
+					Usage:  "websocket address to connect to",
+					Value:  "ws://127.0.0.1:8080/stream",
 					EnvVar: "REAPER_STREAM_WEBSOCKET",
 				},
 			},
@@ -257,7 +258,7 @@ func BuildApp() *cli.App {
 							b, _ := json.Marshal(msg)
 							if b != nil {
 								b = append(b, '\n')
-								_ , _= os.Stdout.Write(b)
+								_, _ = os.Stdout.Write(b)
 							}
 						case <-lctx.Done():
 							return nil
@@ -271,6 +272,97 @@ func BuildApp() *cli.App {
 				}
 				return nil
 
+			},
+		},
+		{
+			Name:  "stomp",
+			Usage: "write access logs to a message broker using STOMP protocol",
+			Flags: []cli.Flag{
+				cli.StringFlag{
+					Name: "login",
+					Usage: "the user identifier used to authenticate against a secured STOMP server",
+					Value: "guest",
+					EnvVar: "REAPER_STOMP_LOGIN",
+				},
+				cli.StringFlag{
+					Name: "passcode",
+					Usage: "the password used to authenticate against a secured STOMP server",
+					Value: "guest",
+					EnvVar: "REAPER_STOMP_PASSCODE",
+				},
+				cli.StringFlag{
+					Name: "host",
+					Usage: "the name of a virtual host to connect to",
+					Value: "/",
+					EnvVar: "REAPER_STOMP_HOST",
+				},
+				cli.StringFlag{
+					Name: "destination",
+					Usage: "the STOMP destination where to send the message",
+					Value: "/queue/reaper",
+					EnvVar: "REAPER_STOMP_DESTINATION",
+				},
+				cli.StringFlag{
+					Name: "address",
+					Usage: "TCP endpoint of the STOMP server",
+					Value: "127.0.0.1:61613",
+					EnvVar: "REAPER_STOMP_ADDRESS",
+				},
+
+			},
+			Action: func(c *cli.Context) error {
+				logger := NewLogger(c)
+				ctx, cancel := context.WithCancel(context.Background())
+				listenSignals(cancel)
+				g, lctx := errgroup.WithContext(ctx)
+
+				login := c.String("login")
+				passcode := c.String("passcode")
+				host := c.String("host")
+				destination := c.String("destination")
+				addr := c.String("address")
+
+				var connRef atomic.Value
+
+				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
+					conn := connRef.Load()
+					if conn == nil {
+						return ErrNotConnected
+					}
+					b, err := JMarshalEntry(entry)
+					if err != nil {
+						return err
+					}
+					if b == nil {
+						ack(nil)
+						return nil
+					}
+					// TODO: async !
+					err = conn.(*stomp.Conn).Send(destination, "application/json", b, stomp.SendOpt.Receipt)
+					if err == nil {
+						ack(nil)
+					}
+					return err
+				}
+
+				reconnect := func() error {
+					conn := connRef.Load()
+					if conn != nil {
+						_ = conn.(*stomp.Conn).Disconnect()
+					}
+					opts := make([]func(*stomp.Conn) error, 0)
+					if login != "" && passcode != "" {
+						opts = append(opts, stomp.ConnOpt.Login(login, passcode))
+					}
+					opts = append(opts, stomp.ConnOpt.Host(host))
+					c2, err := stomp.Dial("tcp", addr, opts...)
+					if err != nil {
+						return err
+					}
+					connRef.Store(c2)
+					return nil
+				}
+				return action(lctx, g, c, h, reconnect, logger)
 			},
 		},
 		{
@@ -333,9 +425,6 @@ func BuildApp() *cli.App {
 					insert := fmt.Sprintf("INSERT INTO %s VALUES (%s)", into, values)
 					return insert, selectedFields
 				}
-
-
-
 
 				var dbRef atomic.Value
 				ch := make(chan PGEntries)
