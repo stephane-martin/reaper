@@ -275,7 +275,6 @@ func pullEntries(ctx context.Context, cID, chnl, nsqAddr string, h Handler, filt
 	cfg.ClientID = cID
 	cfg.MaxInFlight = maxInFlight
 	cfg.MaxAttempts = 0
-	cfg.Snappy = true
 	cfg.MaxRequeueDelay = 15 * time.Minute
 	cfg.DefaultRequeueDelay = 90 * time.Second
 
@@ -311,19 +310,15 @@ func pullEntries(ctx context.Context, cID, chnl, nsqAddr string, h Handler, filt
 func pushEntries(tcpAddress string, entries <-chan *Entry, logger Logger) error {
 	cfg := nsq.NewConfig()
 	cfg.ClientID = "reaper_producer"
-	cfg.Snappy = true
 	p, err := nsq.NewProducer(tcpAddress, cfg)
 	if err != nil {
 		return err
 	}
 	p.SetLogger(AdaptLoggerNSQD(logger), nsq.LogLevelInfo)
-	logger.Info("Ping nsqd")
 	err = p.Ping()
 	if err != nil {
 		return err
 	}
-	logger.Info("Pong nsqd")
-	defer p.Stop()
 	logger.Info("Start publish to nsqd")
 
 	for entry := range entries {
@@ -337,5 +332,6 @@ func pushEntries(tcpAddress string, entries <-chan *Entry, logger Logger) error 
 			}
 		}
 	}
+	p.Stop()
 	return nil
 }

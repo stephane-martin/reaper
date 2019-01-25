@@ -1061,6 +1061,7 @@ func BuildApp() *cli.App {
 
 				cfg := nsq.NewConfig()
 				cfg.ClientID = "reaper_nsq_to_nsq"
+				cfg.Snappy = true
 				p, err := nsq.NewProducer(tcpAddress, cfg)
 				if err != nil {
 					logger.Error("failed to create external nsq producer", "error", err.Error())
@@ -1072,11 +1073,11 @@ func BuildApp() *cli.App {
 					for {
 						select {
 						case <-lctx.Done():
-							return lctx.Err()
+							return nil
 						case t, ok := <-done:
 							if !ok {
 								done = nil
-							} else {
+							} else if t != nil {
 								t.Args[0].(func(error))(t.Error)
 							}
 						}
