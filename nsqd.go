@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/dop251/goja"
 	"io/ioutil"
 	"net"
 	"os"
@@ -75,7 +76,7 @@ func WaitNSQD(ctx context.Context) error {
 	}
 }
 
-func NSQD(ctx context.Context, opts *nsqd.Options, incoming <-chan *Entry, h Handler, reconnect func() error, maxInFlight int, logger Logger) error {
+func NSQD(ctx context.Context, opts *nsqd.Options, filterOut []string, incoming <-chan *Entry, h Handler, reconnect func() error, maxInFlight int, logger Logger) error {
 	if maxInFlight <= 0 {
 		maxInFlight = 1000
 	}
@@ -108,7 +109,7 @@ func NSQD(ctx context.Context, opts *nsqd.Options, incoming <-chan *Entry, h Han
 	g, lctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		return pushEntries(lctx, opts.TCPAddress, incoming, logger)
+		return pushEntries(lctx, opts.TCPAddress, filterOut, incoming, logger)
 	})
 
 	if h != nil {
@@ -267,7 +268,7 @@ func pullEntries(ctx context.Context, cID, chnl, nsqAddr string, h Handler, maxR
 	}
 }
 
-func pushEntries(ctx context.Context, tcpAddress string, entries <-chan *Entry, logger Logger) error {
+func pushEntries(ctx context.Context, tcpAddress string, filterOut []string, entries <-chan *Entry, logger Logger) error {
 	cfg := nsq.NewConfig()
 	cfg.ClientID = "reaper_producer"
 	cfg.Snappy = true
@@ -307,6 +308,24 @@ func pushEntries(ctx context.Context, tcpAddress string, entries <-chan *Entry, 
 	})
 
 	g.Go(func() error {
+		var vm *goja.Runtime
+		filters := make([]*goja.Program, 0, len(filterOut))
+
+		for _, filter := range filterOut {
+			if filter == "" {
+				continue
+			}
+			prg, err := goja.Compile("filterOut", filter, true)
+			if err != nil {
+				logger.Warn("Invalid filter ignored", "filter", filter)
+				continue
+			}
+			filters = append(filters, prg)
+			if vm == nil {
+				vm = goja.New()
+			}
+		}
+
 	L:
 		for {
 			select {
@@ -317,6 +336,16 @@ func pushEntries(ctx context.Context, tcpAddress string, entries <-chan *Entry, 
 					entries = nil
 					continue L
 				}
+
+				if vm != nil {
+					out, err := entry.ToVM(vm, filters)
+					if err != nil {
+						logger.Warn("Error evaluating filterOut function", "error", err)
+					} else if out {
+						continue L
+					}
+				}
+
 				b, err := MarshalEntry(entry)
 				if err != nil {
 					logger.Warn("Failed to message-pack encode entry", "error", err)

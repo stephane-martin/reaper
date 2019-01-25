@@ -159,6 +159,11 @@ func BuildApp() *cli.App {
 			Value:  1000,
 			EnvVar: "REAPER_MAX_INFLIGHT",
 		},
+		cli.StringSliceFlag{
+			Name: "filterout",
+			Usage: "filter out access log entries when the expression is true",
+			EnvVar: "REAPER_FILTER_OUT",
+		},
 	}
 
 	app.Action = func(c *cli.Context) error {
@@ -444,7 +449,7 @@ func BuildApp() *cli.App {
 					select {
 					case <-done:
 						return context.Canceled
-					case ch <- PGEntries{ACK: ack, Fields: Fields(entry, fieldNames)}:
+					case ch <- PGEntries{ACK: ack, Fields: ToFields(entry, fieldNames)}:
 						return nil
 					}
 				}
@@ -1141,6 +1146,7 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	websocketAddr := c.GlobalString("websocket-address")
 	httpAddr := c.GlobalString("http-address")
 	maxInFlight := c.GlobalInt("max-inflight")
+	filterOut := c.GlobalStringSlice("filterout")
 
 	var httpRoutes, websocketRoutes *gin.Engine
 	var httpListener, websocketListener net.Listener
@@ -1173,7 +1179,7 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	}
 
 	g.Go(func() error {
-		return NSQD(ctx, nsqdOpts, incoming, h, reconnect, maxInFlight, logger)
+		return NSQD(ctx, nsqdOpts, filterOut, incoming, h, reconnect, maxInFlight, logger)
 	})
 
 	g.Go(func() error {

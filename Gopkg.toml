@@ -70,6 +70,9 @@
     name = "github.com/elazarl/go-bindata-assetfs"
     branch = "master"
 
+[[constraint]]
+    name = "github.com/dop251/goja"
+    branch = "master"
 
 [[override]]
 	name = "github.com/golang/snappy"

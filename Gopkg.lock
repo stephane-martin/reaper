@@ -48,6 +48,31 @@
   version = "v1.1.1"
 
 [[projects]]
+  digest = "1:72dc2b6056e7097f829260e4a2ff08d32fec6017df1982a66e110ab4128486f8"
+  name = "github.com/dlclark/regexp2"
+  packages = [
+    ".",
+    "syntax",
+  ]
+  pruneopts = "UT"
+  revision = "487489b64fb796de2e55f4e8a4ad1e145f80e957"
+  version = "v1.1.6"
+
+[[projects]]
+  branch = "master"
+  digest = "1:70671a6b35e4f052740ac0ad500621ba43230b9133945de1afc87977de7101f4"
+  name = "github.com/dop251/goja"
+  packages = [
+    ".",
+    "ast",
+    "file",
+    "parser",
+    "token",
+  ]
+  pruneopts = "UT"
+  revision = "6d5bf35058fa6d8d81be15498c42c11a6a75c391"
+
+[[projects]]
   digest = "1:1f0c7ab489b407a7f8f9ad16c25a504d28ab461517a971d341388a56156c1bd7"
   name = "github.com/eapache/go-resiliency"
   packages = ["breaker"]
@@ -115,6 +140,17 @@
   pruneopts = "UT"
   revision = "22be8a3eaf992c828cecb69dc07348313bf08d2e"
   version = "v6.15.1"
+
+[[projects]]
+  digest = "1:3e658acf1e5e75c289ba64c08c6006382980f6cbcf3b17505adc95f4dafa40f6"
+  name = "github.com/go-sourcemap/sourcemap"
+  packages = [
+    ".",
+    "internal/base64vlq",
+  ]
+  pruneopts = "UT"
+  revision = "b019cc30c1eaa584753491b0d8f8c1534bf1eb44"
+  version = "v2.1.2"
 
 [[projects]]
   digest = "1:586ea76dbd0374d6fb649a91d70d652b7fe0ccffb8910a77468e7702e7901f3d"
@@ -460,6 +496,28 @@
   revision = "b90733256f2e882e81d52f9126de08df5615afd9"
 
 [[projects]]
+  digest = "1:0f60a87d38e0f08d784e6a11a700314475970acfd7f5a14929e55facaba54ac8"
+  name = "golang.org/x/text"
+  packages = [
+    "cases",
+    "collate",
+    "collate/build",
+    "internal",
+    "internal/colltab",
+    "internal/gen",
+    "internal/tag",
+    "internal/triegen",
+    "internal/ucd",
+    "language",
+    "transform",
+    "unicode/cldr",
+    "unicode/norm",
+  ]
+  pruneopts = "UT"
+  revision = "f21a4dfb5e38f5895301dc265a8def02365cc3d0"
+  version = "v0.3.0"
+
+[[projects]]
   digest = "1:cbc72c4c4886a918d6ab4b95e347ffe259846260f99ebdd8a198c2331cf2b2e9"
   name = "gopkg.in/go-playground/validator.v8"
   packages = ["."]
@@ -480,6 +538,7 @@
   analyzer-version = 1
   input-imports = [
     "github.com/Shopify/sarama",
+    "github.com/dop251/goja",
     "github.com/elazarl/go-bindata-assetfs",
     "github.com/gin-gonic/gin",
     "github.com/go-redis/redis",

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"github.com/dop251/goja"
 )
 
 func NewEntry() *Entry {
@@ -48,7 +49,7 @@ func JMarshalEntry(e *Entry) ([]byte, error) {
 	return b, nil
 }
 
-func Fields(e *Entry, fields []string) []interface{} {
+func ToFields(e *Entry, fields []string) []interface{} {
 	res := make([]interface{}, 0, len(fields))
 	for _, f := range fields {
 		res = append(res, e.Fields[f])
@@ -99,6 +100,36 @@ func (e *Entry) Set(key string, value interface{}) {
 			}
 		}
 	}
+}
+
+var undef = goja.Undefined()
+
+func (e Entry) ToVM(runtime *goja.Runtime, filters []*goja.Program) (bool, error) {
+	var k string
+	var v interface{}
+
+	for k, v = range e.Fields {
+		runtime.Set(k, v)
+	}
+	for _, filter := range filters {
+		result, err := runtime.RunProgram(filter)
+		if err != nil {
+			for k = range e.Fields {
+				runtime.Set(k, undef)
+			}
+			return false, err
+		}
+		if result.ToBoolean() {
+			for k = range e.Fields {
+				runtime.Set(k, undef)
+			}
+			return true, nil
+		}
+	}
+	for k = range e.Fields {
+		runtime.Set(k, undef)
+	}
+	return false, nil
 }
 
 func (e Entry) String() string {
