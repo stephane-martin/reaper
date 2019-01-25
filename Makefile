@@ -9,8 +9,8 @@ STATICFILES = $(shell find static -type f)
 BINARY=reaper
 FULL=github.com/stephane-martin/reaper
 VERSION=0.1.0
-LDFLAGS=-ldflags '-X main.Version=${VERSION} -X services.GinMode=debug'
-LDFLAGS_RELEASE=-ldflags '-w -s -X main.Version=${VERSION} -X services.GinMode=release'
+LDFLAGS=-ldflags '-X main.Version=${VERSION} -X main.GinMode=debug'
+LDFLAGS_RELEASE=-ldflags '-w -s -X main.Version=${VERSION} -X main.GinMode=release'
 
 debug: ${BINARY}_debug
 release: ${BINARY}
