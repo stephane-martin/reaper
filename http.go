@@ -43,7 +43,7 @@ type EntryACK struct {
 	ACK   func(error)
 }
 
-func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAddr string, logger Logger) {
+func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAddr string, filterOut []string, logger Logger) {
 
 	router.GET("/status", func(c *gin.Context) {
 		c.Status(200)
@@ -131,7 +131,7 @@ func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAd
 		g, lctx := errgroup.WithContext(ctx)
 
 		g.Go(func() error {
-			err := pullEntries(lctx, nsqClientID, channel, nsqdTCPAddr, handler, size, 1, logger)
+			err := pullEntries(lctx, nsqClientID, channel, nsqdTCPAddr, handler, filterOut, size, 1, logger)
 			close(entries)
 			if err == ErrPullFinished {
 				return nil

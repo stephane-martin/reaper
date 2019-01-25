@@ -64,7 +64,6 @@ func buildNSQDOptions(c *cli.Context, l Logger) (*nsqd.Options, error) {
 	return opts, nil
 }
 
-
 var nsqdReady = make(chan struct{})
 
 func WaitNSQD(ctx context.Context) error {
@@ -109,13 +108,22 @@ func NSQD(ctx context.Context, opts *nsqd.Options, filterOut []string, incoming 
 	g, lctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		return pushEntries(lctx, opts.TCPAddress, filterOut, incoming, logger)
+		return pushEntries(lctx, opts.TCPAddress, incoming, logger)
 	})
 
 	if h != nil {
 		g.Go(func() error {
 			for {
-				err := pullEntries(lctx, "reaper_puller", "reaper_puller", opts.TCPAddress, h, -1, maxInFlight, logger)
+				err := pullEntries(
+					lctx,
+					"reaper_puller",
+					"reaper_puller",
+					opts.TCPAddress,
+					h, filterOut,
+					-1,
+					maxInFlight,
+					logger,
+				)
 				if err == nil || err == context.Canceled {
 					return context.Canceled
 				}
@@ -158,6 +166,8 @@ type handler struct {
 	once       sync.Once
 	returned   utomic.Int64
 	maxEntries int64
+	vm         *goja.Runtime
+	filters    []*goja.Program
 }
 
 func (h *handler) markError(err error) {
@@ -201,6 +211,17 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 		message.Finish()
 		return nil
 	}
+
+	if h.vm != nil {
+		out, err := entry.ToVM(h.vm, h.filters)
+		if err != nil {
+			h.logger.Warn("Error evaluating filterOut function", "error", err)
+		} else if out {
+			message.Finish()
+			return nil
+		}
+	}
+
 	err = h.th(h.done, entry, func(e error) {
 		h.markError(e)
 		if e == nil {
@@ -218,7 +239,32 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 	return err
 }
 
-func pullEntries(ctx context.Context, cID, chnl, nsqAddr string, h Handler, maxReturned, maxInFlight int, l Logger) error {
+func newHandler(ctx context.Context, h Handler, filterOut []string, l Logger, errs chan error, maxReturned int) *handler {
+	h2 := &handler{
+		th:         h,
+		logger:     l,
+		done:       ctx.Done(),
+		errs:       errs,
+		maxEntries: int64(maxReturned),
+	}
+	for _, filter := range filterOut {
+		if filter == "" {
+			continue
+		}
+		prg, err := goja.Compile("filterOut", filter, true)
+		if err != nil {
+			l.Warn("Invalid filter ignored", "filter", filter)
+			continue
+		}
+		h2.filters = append(h2.filters, prg)
+		if h2.vm == nil {
+			h2.vm = goja.New()
+		}
+	}
+	return h2
+}
+
+func pullEntries(ctx context.Context, cID, chnl, nsqAddr string, h Handler, filterOut []string, maxReturned, maxInFlight int, l Logger) error {
 	if maxInFlight <= 0 {
 		maxInFlight = 1000
 	}
@@ -240,13 +286,7 @@ func pullEntries(ctx context.Context, cID, chnl, nsqAddr string, h Handler, maxR
 	c.SetLogger(AdaptLoggerNSQD(l), nsq.LogLevelInfo)
 	errs := make(chan error)
 
-	c.AddHandler(&handler{
-		th:     h,
-		logger: l,
-		done:   ctx.Done(),
-		errs:   errs,
-		maxEntries: int64(maxReturned),
-	})
+	c.AddHandler(newHandler(ctx, h, filterOut, l, errs, maxReturned))
 
 	err = c.ConnectToNSQD(nsqAddr)
 	if err != nil {
@@ -268,7 +308,7 @@ func pullEntries(ctx context.Context, cID, chnl, nsqAddr string, h Handler, maxR
 	}
 }
 
-func pushEntries(ctx context.Context, tcpAddress string, filterOut []string, entries <-chan *Entry, logger Logger) error {
+func pushEntries(ctx context.Context, tcpAddress string, entries <-chan *Entry, logger Logger) error {
 	cfg := nsq.NewConfig()
 	cfg.ClientID = "reaper_producer"
 	cfg.Snappy = true
@@ -308,23 +348,6 @@ func pushEntries(ctx context.Context, tcpAddress string, filterOut []string, ent
 	})
 
 	g.Go(func() error {
-		var vm *goja.Runtime
-		filters := make([]*goja.Program, 0, len(filterOut))
-
-		for _, filter := range filterOut {
-			if filter == "" {
-				continue
-			}
-			prg, err := goja.Compile("filterOut", filter, true)
-			if err != nil {
-				logger.Warn("Invalid filter ignored", "filter", filter)
-				continue
-			}
-			filters = append(filters, prg)
-			if vm == nil {
-				vm = goja.New()
-			}
-		}
 
 	L:
 		for {
@@ -335,15 +358,6 @@ func pushEntries(ctx context.Context, tcpAddress string, filterOut []string, ent
 				if !ok {
 					entries = nil
 					continue L
-				}
-
-				if vm != nil {
-					out, err := entry.ToVM(vm, filters)
-					if err != nil {
-						logger.Warn("Error evaluating filterOut function", "error", err)
-					} else if out {
-						continue L
-					}
 				}
 
 				b, err := MarshalEntry(entry)

@@ -1153,7 +1153,7 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 
 	if httpAddr != "" {
 		httpRoutes = gin.Default()
-		HTTPRoutes(ctx, httpRoutes, nsqdOpts.TCPAddress, nsqdOpts.HTTPAddress, logger)
+		HTTPRoutes(ctx, httpRoutes, nsqdOpts.TCPAddress, nsqdOpts.HTTPAddress, filterOut, logger)
 	}
 
 	if websocketAddr != "" {
@@ -1161,7 +1161,7 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 		if websocketAddr != httpAddr {
 			websocketRoutes = gin.Default()
 		}
-		WebsocketRoutes(ctx, websocketRoutes, nsqdOpts.TCPAddress, logger)
+		WebsocketRoutes(ctx, websocketRoutes, nsqdOpts.TCPAddress, filterOut, logger)
 	}
 
 	if httpRoutes != nil {

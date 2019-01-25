@@ -44,7 +44,7 @@ func staticRessources(router *gin.Engine, paths []string, subDirectory string) {
 	}
 }
 
-func WebsocketRoutes(ctx context.Context, router *gin.Engine, nsqdAddr string, logger Logger) {
+func WebsocketRoutes(ctx context.Context, router *gin.Engine, nsqdAddr string, filterOut []string, logger Logger) {
 	staticRessources(router, []string{"/stream.html"}, "static")
 
 	router.Any("/stream", func(c *gin.Context) {
@@ -74,7 +74,7 @@ func WebsocketRoutes(ctx context.Context, router *gin.Engine, nsqdAddr string, l
 		g, lctx := errgroup.WithContext(ctx)
 
 		g.Go(func() error {
-			err := pullEntries(lctx, channel, channel, nsqdAddr, handler, -1, 1, logger)
+			err := pullEntries(lctx, channel, channel, nsqdAddr, handler, filterOut, -1, 1, logger)
 			close(entries)
 			return err
 		})
