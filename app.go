@@ -1138,7 +1138,7 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 		return err
 	}
 
-	incoming := make(chan *Entry, 10000)
+	incoming := make(chan *Entry)
 	tcpAddrs := c.GlobalStringSlice("tcp")
 	udpAddrs := c.GlobalStringSlice("udp")
 	stdin := c.GlobalBool("stdin")
