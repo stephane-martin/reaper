@@ -108,7 +108,7 @@ func NSQD(ctx context.Context, opts *nsqd.Options, filterOut []string, incoming 
 	g, lctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		return pushEntries(lctx, opts.TCPAddress, incoming, logger)
+		return pushEntries(opts.TCPAddress, incoming, logger)
 	})
 
 	if h != nil {
@@ -142,7 +142,7 @@ func NSQD(ctx context.Context, opts *nsqd.Options, filterOut []string, incoming 
 					logger.Warn("Failed to reconnect handler", "error", err)
 					select {
 					case <-lctx.Done():
-						return lctx.Err()
+						return nil
 					case <-time.After(5 * time.Second):
 					}
 				}
@@ -253,7 +253,7 @@ func newHandler(ctx context.Context, h Handler, filterOut []string, l Logger, er
 		}
 		prg, err := goja.Compile("filterOut", filter, true)
 		if err != nil {
-			l.Warn("Invalid filter ignored", "filter", filter)
+			l.Warn("Invalid filter ignored", "filter", filter, "error", err)
 			continue
 		}
 		h2.filters = append(h2.filters, prg)
@@ -308,7 +308,7 @@ func pullEntries(ctx context.Context, cID, chnl, nsqAddr string, h Handler, filt
 	}
 }
 
-func pushEntries(ctx context.Context, tcpAddress string, entries <-chan *Entry, logger Logger) error {
+func pushEntries(tcpAddress string, entries <-chan *Entry, logger Logger) error {
 	cfg := nsq.NewConfig()
 	cfg.ClientID = "reaper_producer"
 	cfg.Snappy = true
@@ -326,53 +326,16 @@ func pushEntries(ctx context.Context, tcpAddress string, entries <-chan *Entry, 
 	defer p.Stop()
 	logger.Info("Start publish to nsqd")
 
-	doneChan := make(chan *nsq.ProducerTransaction)
-
-	g, lctx := errgroup.WithContext(ctx)
-
-	g.Go(func() error {
-		done := doneChan
-		for {
-			select {
-			case <-lctx.Done():
-				return lctx.Err()
-			case t, ok := <-done:
-				if !ok {
-					done = nil
-				} else if t.Error != nil {
-					return t.Error
-				}
+	for entry := range entries {
+		b, err := MarshalEntry(entry)
+		if err != nil {
+			logger.Warn("Failed to message-pack encode entry", "error", err)
+		} else if b != nil {
+			err := p.PublishAsync("embedded", b, nil)
+			if err != nil {
+				return err
 			}
 		}
-
-	})
-
-	g.Go(func() error {
-
-	L:
-		for {
-			select {
-			case <-lctx.Done():
-				return lctx.Err()
-			case entry, ok := <-entries:
-				if !ok {
-					entries = nil
-					continue L
-				}
-
-				b, err := MarshalEntry(entry)
-				if err != nil {
-					logger.Warn("Failed to message-pack encode entry", "error", err)
-				} else if b != nil {
-					err := p.PublishAsync("embedded", b, doneChan)
-					if err != nil {
-						return err
-					}
-				}
-
-			}
-		}
-	})
-
-	return g.Wait()
+	}
+	return nil
 }
