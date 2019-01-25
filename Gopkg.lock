@@ -81,11 +81,11 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:36fe9527deed01d2a317617e59304eb2c4ce9f8a24115bcc5c2e37b3aee5bae4"
+  digest = "1:38f00d85208f9f51e51063b0b90687d72f3ad61a7b6135d3ab6cb21e7b68dff2"
   name = "github.com/gin-contrib/sse"
   packages = ["."]
   pruneopts = "UT"
-  revision = "22d885f9ecc78bf4ee5d72b937e4bbcdc58e8cae"
+  revision = "a7658810eb745c2f22927282dea478278103a897"
 
 [[projects]]
   digest = "1:d5083934eb25e45d17f72ffa86cae3814f4a9d6c073c4f16b64147169b245606"
@@ -371,7 +371,6 @@
   revision = "56726106282f1985ea77d5305743db7231b0c0a8"
 
 [[projects]]
-  branch = "master"
   digest = "1:ce62b400185bf6b16ef6088011b719e449f5c15c4adb6821589679f752c2788e"
   name = "github.com/prometheus/common"
   packages = [
@@ -381,6 +380,7 @@
   ]
   pruneopts = "UT"
   revision = "2998b132700a7d019ff618c06a234b47c1f3f681"
+  version = "v0.1.0"
 
 [[projects]]
   branch = "master"
@@ -453,11 +453,11 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:bd7f9a2ec2751199499f5cf1d0e23ccf4d92f75b4bfba17ce79ae0f7c85deaa9"
+  digest = "1:db12953ac7a80656b159265fe13146959beaada45938a532f484a3aeb289462e"
   name = "golang.org/x/sys"
   packages = ["unix"]
   pruneopts = "UT"
-  revision = "770c60269bf0ef965e9e7ac8bedcb6bca2a1cefd"
+  revision = "b90733256f2e882e81d52f9126de08df5615afd9"
 
 [[projects]]
   digest = "1:cbc72c4c4886a918d6ab4b95e347ffe259846260f99ebdd8a198c2331cf2b2e9"
