@@ -303,7 +303,7 @@ func BuildApp() *cli.App {
 					EnvVar: "REAPER_STOMP_DESTINATION",
 				},
 				cli.StringFlag{
-					Name: "address",
+					Name: "address,addr",
 					Usage: "TCP endpoint of the STOMP server",
 					Value: "127.0.0.1:61613",
 					EnvVar: "REAPER_STOMP_ADDRESS",
