@@ -20,11 +20,11 @@ tag:
 	dep ensure
 	./retool do go-bindata static/
 	git add .
-	git commit -m "Version ${VERSION}"
-	git tag -a -m "Version ${VERSION}"
+	git commit
+	git tag -a ${VERSION} -m "Version ${VERSION}"
 	git push
 	git push --tags
-
+	
 ${BINARY}_debug: ${SOURCES} ${STATICFILES} model_gen.go .tools_sync
 	dep ensure
 	./retool do go-bindata -debug static/
