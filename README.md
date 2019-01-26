@@ -43,6 +43,7 @@ environments.
     The Go compiler and `dep` (https://golang.github.io/dep) are required
     
     `git clone https://github.com/stephane-martin/reaper` in an appropriate folder (GOPATH...)
+    
     `make debug` or `make release`
     
 -   Compile from source using Docker
@@ -50,6 +51,7 @@ environments.
     If you can't install Golang and dep, you can also compile reaper using Docker
     
     `git clone https://github.com/stephane-martin/reaper`
+    
     `sudo make dockerbuild`
     
 ### Configure
@@ -60,6 +62,7 @@ environment variables.
 ### Inline help
 
 `reaper --help`
+
 `reaper (command) --help`
 
 ### Use reaper
