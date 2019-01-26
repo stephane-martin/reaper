@@ -2,6 +2,45 @@
 
 `reaper` is a simple tool to collect access logs from web servers and publish the logs to an external message queue.
 
+
+```
+                                                         
+                                                                                   ,,,,,          ,,,,,                                    
+                                                                                 ,,,,,,,,,     ,,,,,,,,,,                                  
+                                                                                ,,,,,,,,,,,,  ,,,,,,,,,,,,                                 
+                                                                               ,,,,,,,,,,,,,,,,,,,,,,,,,,,,                                
+                                         ##                                   ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,                               
+                                      ####                                   ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,                               
+                                    #####                                    ,,,@@@@@*,,,,,,,,,,,,,,,@@@@@,,,                              
+                                  ######                                    ,,,,,#@@@@@&,,,,,,,,,,/@@@@@@,,,,                              
+                                #######                                     ,,,,,,,@@@@@@,,,,,,,,@@@@@@,,,,,,,                             
+                             #########                                      ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,                             
+                            ##########                                      ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,                             
+                          ###########                                       ,,,,,,,,,,,,,,,,(/,,,,,,,,,,,,,,,,                             
+                         ###########                                        ,,,,,,@,/@@,,@,,@@,,@,,@@*,@,,,,,,                             
+                        ############                                         ,,,,,,@@@@@@&@@@@@@@@@@@@@,,,,,,                              
+                      #############                                           ,,,,,,,@@@@@@@@@@@@@@@@,,,,,,,                               
+                     ##############                                              ,,,,@,@@@@@@@@@@@@,@,,,,                                  
+                    ##############                                                  ,,,,@@,@@@@,@@,,*,                                     
+                    ##############                                                   .,,,*,,@@,,/,,,                                       
+                   ###############                                                     ,,,,,%#,,,,,                                        
+                  ###############                                                       ,,,,,,,,,,                                         
+                  ###############                                                       .,,,,,,,,                                          
+                 ################                                                                                                          
+                 ################                                                                                                          
+                 ################                                                                                                          
+                 ################                                                    GIVE ME YOUR LOGS                
+                 ################                                                                                                          
+                  ##################                                                                                                       
+                   ##################                                                                                                      
+                   ###################                                                                                      .////.         
+                    ####################                                                                                ///////////        
+                     #####################                                                                               ////.  *///       
+                      #################                                                                                   *//      //      
+                       ########                                                                                            /        /                                            
+```
+
+
 ## Features
 
 - Collect log on TCP/UDP syslog
@@ -309,7 +348,7 @@ Alternatively reaper can use syslog with `--syslog`
 
 ## Design
 
-reaper embeds a nsqd (https://nsq.io). When access logs entries are received on TCP, UDP or stdin, they are
+reaper embeds a nsqd service (https://nsq.io). When access logs entries are received on TCP, UDP or stdin, they are
 first stored in the embedded nsqd. Thus, reaper only deletes an access log entry when it has been reliably sent to the
 configured destination.
 
