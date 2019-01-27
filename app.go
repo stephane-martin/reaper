@@ -8,19 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Shopify/sarama"
-	"github.com/gin-gonic/gin"
-	"github.com/go-redis/redis"
-	"github.com/go-stomp/stomp"
-	"github.com/gorilla/websocket"
-	"github.com/lib/pq"
-	"github.com/nsqio/go-nsq"
-	"github.com/olivere/elastic"
-	"github.com/orcaman/concurrent-map"
-	"github.com/streadway/amqp"
-	"github.com/urfave/cli"
-	utomic "go.uber.org/atomic"
-	"golang.org/x/sync/errgroup"
 	"io"
 	"net"
 	"net/http"
@@ -32,6 +19,20 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/Shopify/sarama"
+	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis"
+	"github.com/go-stomp/stomp"
+	"github.com/gorilla/websocket"
+	"github.com/lib/pq"
+	nsq "github.com/nsqio/go-nsq"
+	"github.com/olivere/elastic"
+	cmap "github.com/orcaman/concurrent-map"
+	"github.com/streadway/amqp"
+	"github.com/urfave/cli"
+	utomic "go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
 )
 
 var Version string
@@ -279,36 +280,35 @@ func BuildApp() *cli.App {
 			Usage: "write access logs to a message broker using STOMP protocol",
 			Flags: []cli.Flag{
 				cli.StringFlag{
-					Name: "login",
-					Usage: "the user identifier used to authenticate against a secured STOMP server",
-					Value: "guest",
+					Name:   "login",
+					Usage:  "the user identifier used to authenticate against a secured STOMP server",
+					Value:  "guest",
 					EnvVar: "REAPER_STOMP_LOGIN",
 				},
 				cli.StringFlag{
-					Name: "passcode",
-					Usage: "the password used to authenticate against a secured STOMP server",
-					Value: "guest",
+					Name:   "passcode",
+					Usage:  "the password used to authenticate against a secured STOMP server",
+					Value:  "guest",
 					EnvVar: "REAPER_STOMP_PASSCODE",
 				},
 				cli.StringFlag{
-					Name: "host",
-					Usage: "the name of a virtual host to connect to",
-					Value: "/",
+					Name:   "host",
+					Usage:  "the name of a virtual host to connect to",
+					Value:  "/",
 					EnvVar: "REAPER_STOMP_HOST",
 				},
 				cli.StringFlag{
-					Name: "destination",
-					Usage: "the STOMP destination where to send the message",
-					Value: "/queue/reaper",
+					Name:   "destination",
+					Usage:  "the STOMP destination where to send the message",
+					Value:  "/queue/reaper",
 					EnvVar: "REAPER_STOMP_DESTINATION",
 				},
 				cli.StringFlag{
-					Name: "address,addr",
-					Usage: "TCP endpoint of the STOMP server",
-					Value: "127.0.0.1:61613",
+					Name:   "address,addr",
+					Usage:  "TCP endpoint of the STOMP server",
+					Value:  "127.0.0.1:61613",
 					EnvVar: "REAPER_STOMP_ADDRESS",
 				},
-
 			},
 			Action: func(c *cli.Context) error {
 				logger := NewLogger(c)

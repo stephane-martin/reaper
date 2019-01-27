@@ -1,6 +1,6 @@
 .POSIX:
 .SUFFIXES:
-.PHONY: debug release vet clean version staticcheck revive dockerbuild docker push all tag
+.PHONY: debug release vet clean version staticcheck revive dockerbuild docker push all tag upload
 .SILENT: version dockerbuild
 
 SOURCES = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
@@ -20,11 +20,14 @@ tag:
 	dep ensure
 	./retool do go-bindata static/
 	git add .
-	git commit
+	git commit -m "Version ${VERSION}"
 	git tag -a ${VERSION} -m "Version ${VERSION}"
 	git push
 	git push --tags
-	
+
+upload: all
+	./retool do github-release ${VERSION} reaper_linux_amd64 reaper_linux_arm reaper_linux_arm64 reaper_openbsd_amd64 reaper_freebsd_amd64 --tag ${VERSION} --github-repository stephane-martin/reaper --github-access-token ${GITHUB_TOKEN}
+
 ${BINARY}_debug: ${SOURCES} ${STATICFILES} model_gen.go .tools_sync
 	dep ensure
 	./retool do go-bindata -debug static/

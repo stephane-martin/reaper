@@ -1,46 +1,43 @@
-# reaper
+---
+title: reaper
+---
 
 `reaper` is a simple tool to collect access logs from web servers and publish the logs to an external message queue.
 
 
 ```
-                                                                ,,,,,          ,,,,,       
-                                                              ,,,,,,,,,     ,,,,,,,,,,     
-                                                             ,,,,,,,,,,,,  ,,,,,,,,,,,,                            
-                                                            ,,,,,,,,,,,,,,,,,,,,,,,,,,,,                           
-                              ##                           ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,                          
-                           ####                           ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,                          
-                         #####                            ,,,@@@@@*,,,,,,,,,,,,,,,@@@@@,,,                         
-                       ######                            ,,,,,#@@@@@&,,,,,,,,,,/@@@@@@,,,,                         
-                     #######                             ,,,,,,,@@@@@@,,,,,,,,@@@@@@,,,,,,,                        
-                  #########                              ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,                        
-                 ##########                              ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,                        
-               ###########                               ,,,,,,,,,,,,,,,,(/,,,,,,,,,,,,,,,,                        
-              ###########                                ,,,,,,@,/@@,,@,,@@,,@,,@@*,@,,,,,,                        
-             ############                                 ,,,,,,@@@@@@&@@@@@@@@@@@@@,,,,,,                         
-           #############                                   ,,,,,,,@@@@@@@@@@@@@@@@,,,,,,,                          
-          ##############                                      ,,,,@,@@@@@@@@@@@@,@,,,,                             
-         ##############                                          ,,,,@@,@@@@,@@,,*,                                
-         ##############                                           .,,,*,,@@,,/,,,                                  
-        ###############                                             ,,,,,%#,,,,,                                   
-       ###############                                               ,,,,,,,,,,                                    
-       ###############                                               .,,,,,,,,                                     
-      ################                                                                                             
-      ################                                                                                             
-      ################                                                                                             
-      ################                                            GIVE ME YOUR LOGS                
-      ################                                                                                             
-       ##################                                                                                          
-        ##################                                                                                         
-        ###################                                                                              .////.    
-         ####################                                                                        ///////////   
-          #####################                                                                       ////.  *///  
-           #################                                                                           *//      // 
-            ########                                                                                    /        /       
+                                                           ,,,,,          ,,,,,         
+                                                         ,,,,,,,,,     ,,,,,,,,,,       
+                                                        ,,,,,,,,,,,,  ,,,,,,,,,,,,   
+                                                       ,,,,,,,,,,,,,,,,,,,,,,,,,,,,    
+                         ##                           ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,, 
+                      ####                           ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,    
+                    #####                            ,,,@@@@@*,,,,,,,,,,,,,,,@@@@@,,,  
+                  ######                            ,,,,,#@@@@@&,,,,,,,,,,/@@@@@@,,,,     
+                #######                             ,,,,,,,@@@@@@,,,,,,,,@@@@@@,,,,,,,    
+             #########                              ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,    
+            ##########                              ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,   
+          ###########                               ,,,,,,,,,,,,,,,,(/,,,,,,,,,,,,,,,,    
+         ###########                                ,,,,,,@,/@@,,@,,@@,,@,,@@*,@,,,,,,    
+        ############                                 ,,,,,,@@@@@@&@@@@@@@@@@@@@,,,,,,     
+      #############                                   ,,,,,,,@@@@@@@@@@@@@@@@,,,,,,,      
+     ##############                                      ,,,,@,@@@@@@@@@@@@,@,,,,        
+    ##############                                          ,,,,@@,@@@@,@@,,*,           
+    ##############                                           .,,,*,,@@,,/,,,             
+   ###############                                             ,,,,,%#,,,,,             
+  ###############                                               ,,,,,,,,,,               
+  ###############                                               .,,,,,,,,                
+ ################                                                                       
+ ################                                                                        
+ ################                                                                       
+ ################                                            GIVE ME YOUR LOGS           
+ ################                                                                        
+  ##################                                                                      
+   ##################                                                                     
 ```
 
 
-## Features
+# Features
 
 - Collect log on TCP/UDP syslog
 - Syslog RFC3154 or RFC5424
@@ -57,7 +54,7 @@
 - Can forward collected logs to another reaper instance
 - Should work on any *NIX
 
-## Project status
+# Project status
 
 Alpha.
 Version 0.1.0.
@@ -65,53 +62,53 @@ Version 0.1.0.
 reaper is functional and be used in simple environments. But it lacks proper test cases and performance testing in busy
 environments.
 
-## Getting Started
+# Getting Started
 
-### Installing
+## Install
 
 -   Binary releases
 
     https://github.com/stephane-martin/reaper/releases
-    
+
     Just copy the binary in your PATH.
-    
+
 
 -   Compile from source
 
     The Go compiler and `dep` (https://golang.github.io/dep) are required
-    
+
     `git clone https://github.com/stephane-martin/reaper` in an appropriate folder (GOPATH...)
-    
+
     `make debug` or `make release`
-    
+
 -   Compile from source using Docker
 
     If you can't install Golang and dep, you can also compile reaper using Docker
-    
+
     `git clone https://github.com/stephane-martin/reaper`
-    
+
     `sudo make dockerbuild`
-    
-### Configure
+
+## Configure
 
 Currently reaper does not use a configuration file. Arguments are passed on the command line or with
 environment variables.
 
-### Inline help
+## Inline help
 
 `reaper --help`
 
 `reaper (command) --help`
 
-### Use reaper
+## Use reaper
 
-#### Listen for access log entries
+### Listen for access log entries
 
-##### TCP syslog
+#### TCP syslog
 
 Start reaper with `--tcp 127.0.0.1:1514`. Here 127.0.0.1 is the listen address.
 
-##### UDP syslog
+#### UDP syslog
 
 Start reaper with `--udp 127.0.0.1:1514`.
 
@@ -121,11 +118,11 @@ This can be used with nginx or caddy. In nginx.conf:
 access_log syslog:server=127.0.0.1:1514,facility=daemon,tag=nginxaccess,severity=info jrich;
 ```
 
-##### Syslog protocol
+#### Syslog protocol
 
 By default the syslog protocol is supposed to be RFC3164. Use the global flag '--rfc5424' to switch to RFC5424.
 
-##### stdin
+#### stdin
 
 Start reaper with `--stdin`.
 
@@ -135,11 +132,11 @@ This can be used with Apache. For example in Apache configuration:
 CustomLog "||/path/to/reaper --format combined --stdin" combined
 ```
 
-#### Configure access logs format
+### Configure access logs format
 
 reaper needs to know the format in which the web server writes access logs entries. Use the `--format` flag.
 
-##### JSON
+#### JSON
 
 `reaper --udp 127.0.0.1:1514 --format json`
 
@@ -166,7 +163,7 @@ log_format jrich escape=json
 access_log syslog:server=127.0.0.1:1514,facility=daemon,tag=nginxaccess,severity=info jrich;
 ```
 
-##### Key/values
+#### Key/values
 
 `reaper --udp 127.0.0.1:1514 --format kv`
 
@@ -180,15 +177,15 @@ log_format rich
     ' server="$server_name"';
 ```
     
-##### common log format
+#### common log format
 
 `reaper --udp 127.0.0.1:1514 --format common`
 
-##### combined log format
+#### combined log format
 
 `reaper --udp 127.0.0.1:1514 --format combined`
 
-#### Filter access logs
+### Filter access logs
 
 The `--filterout EXPR` global flag can be set to specify a filter. 
 
@@ -203,7 +200,7 @@ Log entries for requests to http://example.org will be filtered out.
 
 Please note that filtering is not free from a performance point of view. It uses an embedded Javascript engine.
 
-#### Forward access logs
+### Forward access logs
 
 reaper can forward access logs to various destinations. The type of the destination is selected through a command on
 reaper command line, after the previous global flags.
@@ -213,17 +210,17 @@ reachable again, buffered entries will be forwarded. So you do not need to start
 
 Each destination has specific flags to configure it.
 
-##### stdout, stderr
+#### stdout, stderr
 
 -   `reaper --udp 127.0.0.1 stdout`
 -   `reaper --udp 127.0.0.1 stderr`
 
-##### file
+#### file
 
 -   `reaper --udp 127.0.0.1 file --filename /tmp/access.log` => write log entries to /tmp/access.log
 -   `reaper --udp 127.0.0.1 file --gzip --filename /tmp/access.log.gz` => write compressed log entries to /tmp/access.log.gz
 
-##### RabbitMQ
+#### RabbitMQ
 
 Forward logs to a RabbitMQ exchange.
 
@@ -232,27 +229,27 @@ Forward logs to a RabbitMQ exchange.
 This will forward entries to a RabbitMQ broker, located at localhost:5672, using guest/guest as credentials,
 to the / virtual host, in the direct exchange exname, and with "key" as a routing key.
 
-##### STOMP
+#### STOMP
 
 `./reaper_debug --udp 127.0.0.1:1514 stomp --login user --passcode password --host virtualhost --destination /queue/reaper --addr 192.168.1.2:61613`
 
-##### Elasticsearch
+#### Elasticsearch
 
 Forward logs to an Elasticsearch server.
 
 `reaper --udp 127.0.0.1 elasticsearch --url http://127.0.0.1:9200 --index indexname`
 
-##### Redis
+#### Redis
 
 Forward logs to Redis, using a redis list (think LPOP, RPUSH). 
 
 `reaper --udp 127.0.0.1 redis --addr 127.0.0.1:6379 --listname thelistkey --database 6 --password pass`
 
-##### Kafka
+#### Kafka
 
 `reaper --udp 127.0.0.1 kafka --broker 192.168.1.2:9092 --broker 192.168.1.3:9092 --broker 192.168.1.4:9092 --topic topicname`
 
-##### PostgreSQL/TimescaleDB
+#### PostgreSQL/TimescaleDB
 
 First you need to create a table in PostgreSQL that is consistent with the log format.
 
@@ -298,11 +295,11 @@ reaper --udp 127.0.0.1:1514 pgsql \
     --fields "timestamp,method,scheme,host,server,uri,duration,length,status,sent,agent,remoteaddr,remoteuser"    
 ```
 
-##### External nsqd
+#### External nsqd
 
 `reaper --udp 127.0.0.1:1514 nsq --addr 192.168.1.2:4150 --topic topicname --json`
 
-##### Forward to another reaper instance
+#### Forward to another reaper instance
 
 On machine A 192.168.1.2 (with web server):
 
@@ -312,7 +309,7 @@ On machine B 192.168.1.3:
 
 `reaper --nsqd-address 192.168.1.3 --nsqd-tcp-port 4150 pgsql ...`
 
-#### HTTP API
+### HTTP API
 
 If started with `--http-address`, reaper exposes a HTTP API.
 
@@ -331,13 +328,13 @@ Endpoints:
     
 -   DELETE /download/:clientid => delete a previously created channel
 
-#### Websocket API
+### Websocket API
 
 If started with `--websocket-address`, reaper exposes a websocket endpoint.
 
 -   /stream: stream received entries to the websocket client.
 
-#### Logging
+### Logging
 
 By default reaper own logs are written on stderr.
 
@@ -345,7 +342,7 @@ The logging level can be set with `--loglevel` [debug, info, warn, error, crit].
 
 Alternatively reaper can use syslog with `--syslog`
 
-## Design
+# Design
 
 reaper embeds a nsqd service (https://nsq.io). When access logs entries are received on TCP, UDP or stdin, they are
 first stored in the embedded nsqd. Thus, reaper only deletes an access log entry when it has been reliably sent to the
@@ -353,7 +350,7 @@ configured destination.
 
 Forwarding to the destination is done asynchronously to achieve good performance.
 
-## Changelog
+# Changelog
 
 https://github.com/stephane-martin/reaper/blob/master/CHANGELOG.md
 
