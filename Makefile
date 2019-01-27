@@ -64,7 +64,7 @@ ${BINARY}_linux_arm64: ${SOURCES} ${STATICFILES} model_gen.go .tools_sync
 	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -a -installsuffix nocgo -tags 'netgo osusergo' -o ${BINARY}_linux_arm64 ${LDFLAGS_RELEASE} ${FULL}
 
 
-all: ${BINARY}_openbsd_amd64 ${BINARY}_freebsd_amd64 ${BINARY}_linux_amd64 ${BINARY}_linux_arm ${BINARY}_linux_arm64
+all: ${BINARY}_openbsd_amd64 ${BINARY}_freebsd_amd64 ${BINARY}_linux_amd64 ${BINARY}_linux_arm ${BINARY}_linux_arm64 README.rst
 
 retool:
 	go get -u github.com/twitchtv/retool
@@ -97,3 +97,8 @@ staticcheck: .tools_sync
 
 revive: .tools_sync
 	./retool do revive -formatter stylish -exclude vendor/... ./...
+
+README.rst: docs/README.md
+	pandoc --from markdown --to rst --toc --standalone -o README.rst docs/README.md
+
+
