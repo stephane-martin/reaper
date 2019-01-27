@@ -6,6 +6,8 @@ reaper
    :depth: 3
 ..
 
+.. section-numbering::
+
 ``reaper`` is a simple tool to collect access logs from web servers and
 publish the logs to an external message queue.
 
