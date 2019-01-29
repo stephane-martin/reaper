@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/cenkalti/backoff"
 	"github.com/dop251/goja"
 	"io/ioutil"
 	"net"
@@ -75,7 +76,7 @@ func WaitNSQD(ctx context.Context) error {
 	}
 }
 
-func NSQD(ctx context.Context, opts *nsqd.Options, filterOut []string, incoming <-chan *Entry, h Handler, reconnect func() error, maxInFlight int, logger Logger) error {
+func NSQD(ctx context.Context, opts *nsqd.Options, filterOut []string, incoming <-chan *Entry, h Handler, reconnect func(context.Context) error, maxInFlight int, logger Logger) error {
 	if maxInFlight <= 0 {
 		maxInFlight = 1000
 	}
@@ -131,19 +132,26 @@ func NSQD(ctx context.Context, opts *nsqd.Options, filterOut []string, incoming 
 				if reconnect == nil {
 					return err
 				}
+
+				bo := backoff.NewExponentialBackOff()
+				bo.InitialInterval = time.Second
+				bo.MaxElapsedTime = 0
+
 			Reconnect:
+
 				for {
 					logger.Info("Reconnecting handler")
-					err = reconnect()
+					err = reconnect(lctx)
 					if err == nil {
 						logger.Info("Handler reconnected")
 						break Reconnect
 					}
-					logger.Warn("Failed to reconnect handler", "error", err)
+					pause := bo.NextBackOff()
+					logger.Warn("Failed to reconnect handler", "error", err, "backoff", pause.String())
 					select {
 					case <-lctx.Done():
 						return nil
-					case <-time.After(5 * time.Second):
+					case <-time.After(pause):
 					}
 				}
 			}
@@ -181,10 +189,9 @@ func (h *handler) markError(err error) {
 
 		select {
 		case h.errs <- err:
-			close(h.errs)
 		case <-h.done:
-			close(h.errs)
 		}
+		close(h.errs)
 	})
 }
 

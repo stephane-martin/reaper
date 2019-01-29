@@ -26,9 +26,9 @@ import (
 	"github.com/go-stomp/stomp"
 	"github.com/gorilla/websocket"
 	"github.com/lib/pq"
-	nsq "github.com/nsqio/go-nsq"
+	"github.com/nsqio/go-nsq"
 	"github.com/olivere/elastic"
-	cmap "github.com/orcaman/concurrent-map"
+	"github.com/orcaman/concurrent-map"
 	"github.com/streadway/amqp"
 	"github.com/urfave/cli"
 	utomic "go.uber.org/atomic"
@@ -57,6 +57,7 @@ func (p KafkaProducer) AsyncClose() {
 }
 
 type RabbitMQChannel struct {
+	Connection *amqp.Connection
 	Channel   *amqp.Channel
 	Callbacks cmap.ConcurrentMap
 	Current   utomic.Uint64
@@ -345,21 +346,30 @@ func BuildApp() *cli.App {
 					return err
 				}
 
-				reconnect := func() error {
+				reconnect := func(ct context.Context) error {
 					conn := connRef.Load()
 					if conn != nil {
 						_ = conn.(*stomp.Conn).Disconnect()
 					}
 					opts := make([]func(*stomp.Conn) error, 0)
+					opts = append(opts, stomp.ConnOpt.Host(host))
+
 					if login != "" && passcode != "" {
 						opts = append(opts, stomp.ConnOpt.Login(login, passcode))
 					}
-					opts = append(opts, stomp.ConnOpt.Host(host))
-					c2, err := stomp.Dial("tcp", addr, opts...)
+					//c2, err := stomp.Dial("tcp", addr, opts...)
+
+					d := net.Dialer{Timeout: 30 * time.Second}
+					c2, err := d.DialContext(ct, "tcp", addr)
 					if err != nil {
 						return err
 					}
-					connRef.Store(c2)
+
+					c3, err := stomp.Connect(c2, opts...)
+					if err != nil {
+						return err
+					}
+					connRef.Store(c3)
 					return nil
 				}
 				return action(lctx, g, c, h, reconnect, logger)
@@ -445,13 +455,13 @@ func BuildApp() *cli.App {
 					return db.Close()
 				}
 
-				reconnect := func() error {
+				reconnect := func(ct context.Context) error {
 					_ = closeDB()
 					db, err := sql.Open("postgres", connURI)
 					if err != nil {
 						return err
 					}
-					err = db.Ping()
+					err = db.PingContext(ct)
 					if err != nil {
 						return err
 					}
@@ -604,15 +614,30 @@ func BuildApp() *cli.App {
 					p := getChannel()
 					if p != nil {
 						_ = p.Channel.Close()
+						_ = p.Connection.Close()
 					}
 				}
 
 				defer closeChannel()
 
-				reconnect := func() error {
+				reconnect := func(ct context.Context) error {
 					closeChannel()
 
-					conn, err := amqp.Dial(uri)
+					conn, err := amqp.DialConfig(uri, amqp.Config{
+						Heartbeat: 10 * time.Second,
+						Locale:    "en_US",
+						Dial: func(network, addr string) (net.Conn, error) {
+							d := net.Dialer{Timeout: 30 * time.Second}
+							conn, err := d.DialContext(ct, network, addr)
+							if err != nil {
+								return nil, err
+							}
+							if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+								return nil, err
+							}
+							return conn, nil
+						},
+					})
 					if err != nil {
 						return err
 					}
@@ -646,48 +671,34 @@ func BuildApp() *cli.App {
 					confirmations := make(chan amqp.Confirmation, maxInFlight+1)
 					channel.NotifyPublish(confirmations)
 
-					g.Go(func() error {
-						for {
-							select {
-							case confirm, ok := <-confirmations:
-								if !ok {
-									return nil
-								}
-								ack, ok := callbacks.Pop(strconv.FormatUint(confirm.DeliveryTag, 10))
-								if !ok {
-									return fmt.Errorf("can't find callback for rabbitmq delivery tag: %d", confirm.DeliveryTag)
-								}
-								//logger.Debug("RabbitMQ confirmation", "tag", confirm.DeliveryTag)
+					go func() {
+						for confirm := range confirmations {
+							ack, ok := callbacks.Pop(strconv.FormatUint(confirm.DeliveryTag, 10))
+							if !ok {
+								logger.Error("can't find callback for rabbitmq delivery tag", "tag", confirm.DeliveryTag)
+							} else {
 								if confirm.Ack {
 									ack.(func(error))(nil)
 								} else {
 									ack.(func(error))(fmt.Errorf("delivery to rabbitmq failed for tag: %d", confirm.DeliveryTag))
 								}
-							case <-lctx.Done():
-								return nil
 							}
 						}
-					})
+					}()
 
 					closes := make(chan *amqp.Error, 1)
 					channel.NotifyClose(closes)
 
-					g.Go(func() error {
-						for {
-							select {
-							case cl, ok := <-closes:
-								if !ok {
-									return nil
-								}
-								logger.Info("RabbitMQ broker notified closing", "error", cl.Error())
-								return nil
-							case <-lctx.Done():
-								return nil
+					go func() {
+						for cl := range closes {
+							if cl != nil {
+								logger.Info("RabbitMQ broker notified about closing", "error", cl.Error())
 							}
 						}
-					})
+					}()
 
 					channelRef.Store(&RabbitMQChannel{
+						Connection: conn,
 						Channel:   channel,
 						Callbacks: callbacks,
 					})
@@ -799,10 +810,10 @@ func BuildApp() *cli.App {
 
 				defer closeProcessor()
 
-				reconnect := func() error {
+				reconnect := func(ct context.Context) error {
 					closeProcessor()
 
-					resp, err := esClient.ClusterHealth().Do(lctx)
+					resp, err := esClient.ClusterHealth().Do(ct)
 					if err != nil {
 						return err
 					}
@@ -979,6 +990,9 @@ func BuildApp() *cli.App {
 					DB:       database,
 				})
 
+				//noinspection GoUnhandledErrorResult
+				defer client.Close()
+
 				reconnect := func() error { return client.Ping().Err() }
 
 				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
@@ -997,7 +1011,7 @@ func BuildApp() *cli.App {
 					return err
 				}
 
-				return action(lctx, g, c, h, reconnect, logger)
+				return action(lctx, g, c, h, cancelReconnect(reconnect), logger)
 			},
 		},
 		{
@@ -1042,21 +1056,28 @@ func BuildApp() *cli.App {
 
 				var producer atomic.Value
 
-				reconnect := func() error {
+				closeProducer := func() {
 					p := producer.Load()
 					if p != nil {
 						p.(KafkaProducer).AsyncClose()
 					}
+				}
+
+				defer closeProducer()
+
+				reconnect := func() error {
+					closeProducer()
 					p2, err := sarama.NewAsyncProducer(brokers, config)
 					if err != nil {
 						return err
 					}
-					succ := p2.Successes()
-					errs := p2.Errors()
-					g.Go(func() error {
+
+					go func() {
+						succ := p2.Successes()
+						errs := p2.Errors()
 						for {
 							if succ == nil && errs == nil {
-								return nil
+								return
 							}
 							select {
 							case s, ok := <-succ:
@@ -1071,11 +1092,10 @@ func BuildApp() *cli.App {
 								} else {
 									e.Msg.Metadata.(func(error))(e.Err)
 								}
-							case <-lctx.Done():
-								return lctx.Err()
 							}
 						}
-					})
+					}()
+
 					producer.Store(KafkaProducer{
 						AsyncProducer: p2,
 						closedOnce:    &sync.Once{},
@@ -1112,7 +1132,7 @@ func BuildApp() *cli.App {
 					}
 				}
 
-				return action(lctx, g, c, h, reconnect, logger)
+				return action(lctx, g, c, h, cancelReconnect(reconnect), logger)
 			},
 		},
 		{
@@ -1157,22 +1177,17 @@ func BuildApp() *cli.App {
 					return err
 				}
 				defer p.Stop()
+
 				doneChan := make(chan *nsq.ProducerTransaction)
-				g.Go(func() error {
-					done := doneChan
-					for {
-						select {
-						case <-lctx.Done():
-							return nil
-						case t, ok := <-done:
-							if !ok {
-								done = nil
-							} else if t != nil {
-								t.Args[0].(func(error))(t.Error)
-							}
+
+				go func() {
+					for t := range doneChan {
+						if t != nil {
+							t.Args[0].(func(error))(t.Error)
 						}
 					}
-				})
+				}()
+
 				p.SetLogger(AdaptLoggerNSQD(logger), nsq.LogLevelInfo)
 
 				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
@@ -1182,31 +1197,23 @@ func BuildApp() *cli.App {
 					)
 					if exportJSON {
 						b, err = JMarshalEntry(entry)
-						if err != nil {
-							return err
-						}
-						if b == nil {
-							ack(nil)
-							return nil
-						}
 					} else {
 						b, err = MarshalEntry(entry)
-						if err != nil {
-							return err
-						}
-						if b == nil {
-							ack(nil)
-							return nil
-						}
+					}
+					if err != nil {
+						return err
+					}
+					if b == nil {
+						ack(nil)
+						return nil
 					}
 					return p.PublishAsync(topic, b, doneChan, ack)
 				}
 
 				reconnect := func() error {
-					logger.Info("Connecting to external nsqd")
 					return p.Ping()
 				}
-				return action(lctx, g, c, h, reconnect, logger)
+				return action(lctx, g, c, h, cancelReconnect(reconnect), logger)
 			},
 		},
 	}
@@ -1214,7 +1221,7 @@ func BuildApp() *cli.App {
 	return app
 }
 
-func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, reconnect func() error, logger Logger) (err error) {
+func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, reconnect func(context.Context) error, logger Logger) (err error) {
 	defer func() {
 		if err != nil {
 			err = cli.NewExitError(err.Error(), 1)
@@ -1385,4 +1392,19 @@ func actionWriter(c *cli.Context, w io.Writer, gzipEnabled bool, gzipLevel int) 
 
 func main() {
 	_ = BuildApp().Run(os.Args)
+}
+
+func cancelReconnect(reconnect func() error) func(context.Context) error {
+	return func(ctx context.Context) error {
+		e := make(chan error)
+		go func() {
+			e <- reconnect()
+		}()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-e:
+			return err
+		}
+	}
 }

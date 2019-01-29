@@ -78,6 +78,10 @@
     name = "github.com/go-stomp/stomp"
     version = "2.0.2"
 
+[[constraint]]
+    name = "github.com/cenkalti/backoff"
+    version = "2.1.1"
+
 
 [[override]]
 	name = "github.com/golang/snappy"
