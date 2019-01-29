@@ -99,6 +99,6 @@ revive: .tools_sync
 	./retool do revive -formatter stylish -exclude vendor/... ./...
 
 README.rst: docs/README.md
-	pandoc --from markdown --to rst --toc --standalone -o README.rst docs/README.md
+	pandoc --from markdown --to rst --toc --number-sections --standalone -o README.rst docs/README.md
 
 
