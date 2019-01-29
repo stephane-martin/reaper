@@ -141,7 +141,9 @@ func NSQD(ctx context.Context, opts *nsqd.Options, filterOut []string, incoming 
 
 				for {
 					logger.Info("Reconnecting handler")
-					err = reconnect(lctx)
+					to, cancel := context.WithTimeout(lctx, 30*time.Second)
+					err = reconnect(to)
+					cancel()
 					if err == nil {
 						logger.Info("Handler reconnected")
 						break Reconnect
@@ -164,12 +166,12 @@ func NSQD(ctx context.Context, opts *nsqd.Options, filterOut []string, incoming 
 	return err
 }
 
-type Handler func(<-chan struct{}, *Entry, func(error)) error
+type Handler func(context.Context, *Entry, func(error)) error
 
 type handler struct {
 	th         Handler
 	logger     Logger
-	done       <-chan struct{}
+	ctx        context.Context
 	errs       chan error
 	once       sync.Once
 	returned   utomic.Int64
@@ -189,7 +191,7 @@ func (h *handler) markError(err error) {
 
 		select {
 		case h.errs <- err:
-		case <-h.done:
+		case <-h.ctx.Done():
 		}
 		close(h.errs)
 	})
@@ -229,7 +231,7 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 		}
 	}
 
-	err = h.th(h.done, entry, func(e error) {
+	err = h.th(h.ctx, entry, func(e error) {
 		h.markError(e)
 		if e == nil {
 			message.Finish()
@@ -250,7 +252,7 @@ func newHandler(ctx context.Context, h Handler, filterOut []string, l Logger, er
 	h2 := &handler{
 		th:         h,
 		logger:     l,
-		done:       ctx.Done(),
+		ctx:        ctx,
 		errs:       errs,
 		maxEntries: int64(maxReturned),
 	}

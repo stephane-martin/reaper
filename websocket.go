@@ -61,10 +61,10 @@ func WebsocketRoutes(ctx context.Context, router *gin.Engine, nsqdAddr string, f
 		clientID := NewULID()
 		channel := fmt.Sprintf("reaper_websocket_%s#ephemeral", clientID.String())
 		entries := make(chan *Entry)
-		handler := func(done <-chan struct{}, e *Entry, ack func(error)) error {
+		handler := func(hctx context.Context, e *Entry, ack func(error)) error {
 			select {
-			case <-done:
-				return context.Canceled
+			case <-hctx.Done():
+				return ErrPullFinished
 			case entries <- e:
 				ack(nil)
 				return nil

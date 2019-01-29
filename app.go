@@ -325,7 +325,7 @@ func BuildApp() *cli.App {
 
 				var connRef atomic.Value
 
-				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
+				h := func(hctx context.Context, entry *Entry, ack func(error)) error {
 					conn := connRef.Load()
 					if conn == nil {
 						return ErrNotConnected
@@ -541,13 +541,13 @@ func BuildApp() *cli.App {
 					return nil
 				}
 
-				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
+				h := func(hctx context.Context, entry *Entry, ack func(error)) error {
 					if getDB() == nil {
 						return ErrNotConnected
 					}
 					select {
-					case <-done:
-						return context.Canceled
+					case <-hctx.Done():
+						return hctx.Err()
 					case ch <- PGEntries{ACK: ack, Fields: ToFields(entry, fieldNames)}:
 						return nil
 					}
@@ -705,7 +705,7 @@ func BuildApp() *cli.App {
 					return nil
 				}
 
-				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
+				h := func(hctx context.Context, entry *Entry, ack func(error)) error {
 					ch := getChannel()
 					if ch == nil {
 						return ErrNotConnected
@@ -883,7 +883,7 @@ func BuildApp() *cli.App {
 					return nil
 				}
 
-				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
+				h := func(hctx context.Context, entry *Entry, ack func(error)) error {
 					p := getProcessor()
 					if p == nil {
 						return ErrNotConnected
@@ -993,9 +993,9 @@ func BuildApp() *cli.App {
 				//noinspection GoUnhandledErrorResult
 				defer client.Close()
 
-				reconnect := func() error { return client.Ping().Err() }
+				reconnect := func(_ context.Context) error { return client.Ping().Err() }
 
-				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
+				h := func(hctx context.Context, entry *Entry, ack func(error)) error {
 					b, err := JMarshalEntry(entry)
 					if err != nil {
 						return err
@@ -1065,11 +1065,17 @@ func BuildApp() *cli.App {
 
 				defer closeProducer()
 
-				reconnect := func() error {
+				reconnect := func(ct context.Context) error {
 					closeProducer()
 					p2, err := sarama.NewAsyncProducer(brokers, config)
 					if err != nil {
 						return err
+					}
+					select {
+					case <-ct.Done():
+						_ = p2.Close()
+						return ct.Err()
+					default:
 					}
 
 					go func() {
@@ -1103,7 +1109,7 @@ func BuildApp() *cli.App {
 					return nil
 				}
 
-				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
+				h := func(hctx context.Context, entry *Entry, ack func(error)) error {
 					p := producer.Load()
 					if p == nil {
 						return ErrNotConnected
@@ -1125,8 +1131,8 @@ func BuildApp() *cli.App {
 						msg.Key = sarama.StringEncoder(entry.Host)
 					}
 					select {
-					case <-done:
-						return context.Canceled
+					case <-hctx.Done():
+						return hctx.Err()
 					case p.(KafkaProducer).Input() <- msg:
 						return nil
 					}
@@ -1190,7 +1196,7 @@ func BuildApp() *cli.App {
 
 				p.SetLogger(AdaptLoggerNSQD(logger), nsq.LogLevelInfo)
 
-				h := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
+				h := func(hctx context.Context, entry *Entry, ack func(error)) error {
 					var (
 						b   []byte
 						err error
@@ -1210,7 +1216,7 @@ func BuildApp() *cli.App {
 					return p.PublishAsync(topic, b, doneChan, ack)
 				}
 
-				reconnect := func() error {
+				reconnect := func(_ context.Context) error {
 					return p.Ping()
 				}
 				return action(lctx, g, c, h, cancelReconnect(reconnect), logger)
@@ -1365,7 +1371,7 @@ func actionWriter(c *cli.Context, w io.Writer, gzipEnabled bool, gzipLevel int) 
 		}
 	})
 
-	handler := func(done <-chan struct{}, entry *Entry, ack func(error)) error {
+	h := func(hctx context.Context, entry *Entry, ack func(error)) error {
 		deadline.Store(time.Now().Add(time.Second))
 
 		b, err := JMarshalEntry(entry)
@@ -1387,18 +1393,19 @@ func actionWriter(c *cli.Context, w io.Writer, gzipEnabled bool, gzipLevel int) 
 		}
 		return err
 	}
-	return action(lctx, g, c, handler, nil, logger)
+	return action(lctx, g, c, h, nil, logger)
 }
 
 func main() {
 	_ = BuildApp().Run(os.Args)
 }
 
-func cancelReconnect(reconnect func() error) func(context.Context) error {
+func cancelReconnect(reconnect func(context.Context) error) func(context.Context) error {
 	return func(ctx context.Context) error {
 		e := make(chan error)
 		go func() {
-			e <- reconnect()
+			e <- reconnect(ctx)
+			close(e)
 		}()
 		select {
 		case <-ctx.Done():

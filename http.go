@@ -119,9 +119,9 @@ func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAd
 
 		entries := make(chan EntryACK)
 
-		handler := func(done <-chan struct{}, e *Entry, ack func(error)) error {
+		handler := func(hctx context.Context, e *Entry, ack func(error)) error {
 			select {
-			case <-done:
+			case <-hctx.Done():
 				return ErrPullFinished
 			case entries <- EntryACK{Entry: e, ACK: ack}:
 				return nil
