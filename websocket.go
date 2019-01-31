@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/elazarl/go-bindata-assetfs"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	assetfs "github.com/elazarl/go-bindata-assetfs"
 	"golang.org/x/sync/errgroup"
 	"net/http"
 	"os"
@@ -60,12 +60,12 @@ func WebsocketRoutes(ctx context.Context, router *gin.Engine, nsqdAddr string, f
 		}
 		clientID := NewULID()
 		channel := fmt.Sprintf("reaper_websocket_%s#ephemeral", clientID.String())
-		entries := make(chan *Entry)
+		entries := make(chan string)
 		handler := func(hctx context.Context, e *Entry, ack func(error)) error {
 			select {
 			case <-hctx.Done():
 				return ErrPullFinished
-			case entries <- e:
+			case entries <- string(e.serialized.B):
 				ack(nil)
 				return nil
 			}
@@ -98,7 +98,6 @@ func WebsocketRoutes(ctx context.Context, router *gin.Engine, nsqdAddr string, f
 
 }
 
-
 func wsReader(conn *websocket.Conn) error {
 	//noinspection GoUnhandledErrorResult
 	defer conn.Close()
@@ -115,7 +114,7 @@ func wsReader(conn *websocket.Conn) error {
 	}
 }
 
-func wsWriter(ctx context.Context, conn *websocket.Conn, entries chan *Entry) error {
+func wsWriter(ctx context.Context, conn *websocket.Conn, entries chan string) error {
 	pingTicker := time.NewTicker(pingPeriod)
 	defer pingTicker.Stop()
 	for {
@@ -139,12 +138,9 @@ func wsWriter(ctx context.Context, conn *websocket.Conn, entries chan *Entry) er
 			if !ok {
 				entries = nil
 			} else {
-				b, err := JMarshalEntry(entry)
-				if err == nil && b != nil {
-					err := conn.WriteMessage(websocket.TextMessage, b)
-					if err != nil {
-						return err
-					}
+				err := conn.WriteMessage(websocket.TextMessage, []byte(entry))
+				if err != nil {
+					return err
 				}
 			}
 		}

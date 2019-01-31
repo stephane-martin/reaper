@@ -3,15 +3,19 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/dop251/goja"
+	"github.com/valyala/bytebufferpool"
 	"strings"
 	"sync"
-	"github.com/dop251/goja"
 )
+
+var serializePool bytebufferpool.Pool
 
 func NewEntry() *Entry {
 	entry := entryPool.Get().(*Entry)
 	entry.UID = NewULID().String()
 	entry.Host = ""
+	entry.serialized = nil
 	for k := range entry.Fields {
 		delete(entry.Fields, k)
 	}
@@ -22,31 +26,11 @@ func ReleaseEntry(e *Entry) {
 	if e == nil {
 		return
 	}
+	if e.serialized != nil {
+		serializePool.Put(e.serialized)
+	}
+	e.serialized = nil
 	entryPool.Put(e)
-}
-
-func MarshalEntry(e *Entry) ([]byte, error) {
-	if e == nil {
-		return nil, nil
-	}
-	b, err := e.MarshalMsg(nil)
-	if err != nil {
-		panic(err)
-	}
-	ReleaseEntry(e)
-	return b, nil
-}
-
-func JMarshalEntry(e *Entry) ([]byte, error) {
-	if e == nil {
-		return nil, nil
-	}
-	b, err := json.Marshal(e.Fields)
-	if err != nil {
-		return nil, err
-	}
-	ReleaseEntry(e)
-	return b, nil
 }
 
 func ToFields(e *Entry, fields []string) []interface{} {
@@ -54,7 +38,6 @@ func ToFields(e *Entry, fields []string) []interface{} {
 	for _, f := range fields {
 		res = append(res, e.Fields[f])
 	}
-	ReleaseEntry(e)
 	return res
 }
 
@@ -67,6 +50,15 @@ func UnmarshalEntry(b []byte) (*Entry, error) {
 	if err != nil {
 		return nil, err
 	}
+	buf := serializePool.Get()
+	enc := json.NewEncoder(buf)
+	enc.SetEscapeHTML(false)
+	err = enc.Encode(entry.Fields)
+	if err != nil {
+		serializePool.Put(buf)
+		return nil, err
+	}
+	entry.serialized = buf
 	return entry, nil
 }
 
@@ -142,5 +134,3 @@ func (e Entry) String() string {
 	}
 	return b.String()
 }
-
-

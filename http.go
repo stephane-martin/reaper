@@ -39,7 +39,7 @@ func validClientID(clientID string) bool {
 }
 
 type EntryACK struct {
-	Entry *Entry
+	Entry string
 	ACK   func(error)
 }
 
@@ -123,7 +123,7 @@ func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAd
 			select {
 			case <-hctx.Done():
 				return ErrPullFinished
-			case entries <- EntryACK{Entry: e, ACK: ack}:
+			case entries <- EntryACK{Entry: string(e.serialized.B), ACK: ack}:
 				return nil
 			}
 		}
@@ -141,7 +141,7 @@ func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAd
 
 		g.Go(func() error {
 			rCtx := c.Request.Context()
-		L:
+
 			for {
 				select {
 				case <-lctx.Done():
@@ -154,14 +154,7 @@ func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAd
 					if !ok {
 						return nil
 					}
-					entry := entryACK.Entry
-					b, err := JMarshalEntry(entry)
-					if b == nil || err != nil {
-						entryACK.ACK(nil)
-						continue L
-					}
-					b = append(b, '\n')
-					_, err = c.Writer.Write(b)
+					_, err = io.WriteString(c.Writer, entryACK.Entry)
 					entryACK.ACK(err)
 					if err != nil {
 						return err

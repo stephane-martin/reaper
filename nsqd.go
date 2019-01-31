@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/cenkalti/backoff"
 	"github.com/dop251/goja"
+	"github.com/tinylib/msgp/msgp"
 	"io/ioutil"
 	"net"
 	"os"
@@ -40,6 +41,11 @@ func buildNSQDOptions(c *cli.Context, l Logger) (*nsqd.Options, error) {
 	opts.StatsdPrefix = "nsqd.embedded.%s"
 	opts.SnappyEnabled = true
 	opts.DeflateEnabled = true
+
+	lookupd := c.GlobalStringSlice("lookupd")
+	if len(lookupd) > 0 {
+		opts.NSQLookupdTCPAddresses = lookupd
+	}
 
 	i, err := os.Stat(opts.DataPath)
 	if err != nil && os.IsNotExist(err) {
@@ -213,10 +219,26 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 		}
 		h.logger.Debug("debug", "returned", returned)
 	}
+	if message.Body == nil {
+		h.logger.Debug("Empty message from nsqd ?!")
+		message.Finish()
+		return nil
+	}
 
 	entry, err := UnmarshalEntry(message.Body)
 	if err != nil {
-		h.logger.Warn("Failed to messagepack-unmarshal entry from nsqd", "error", err)
+		h.logger.Warn("Failed to unmarshal entry from nsqd", "error", err)
+		message.Finish()
+		return nil
+	}
+	if entry == nil {
+		h.logger.Debug("Unmarshal entry is nil ?!")
+		message.Finish()
+		return nil
+	}
+	if entry.serialized.B == nil {
+		h.logger.Debug("Empty message ?!")
+		ReleaseEntry(entry)
 		message.Finish()
 		return nil
 	}
@@ -226,12 +248,14 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 		if err != nil {
 			h.logger.Warn("Error evaluating filterOut function", "error", err)
 		} else if out {
+			ReleaseEntry(entry)
 			message.Finish()
 			return nil
 		}
 	}
 
 	err = h.th(h.ctx, entry, func(e error) {
+		ReleaseEntry(entry)
 		h.markError(e)
 		if e == nil {
 			message.Finish()
@@ -241,8 +265,10 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 	})
 	h.markError(err)
 	if err == ErrNotConnected {
+		ReleaseEntry(entry)
 		message.Requeue(0)
 	} else if err != nil {
+		ReleaseEntry(entry)
 		message.Requeue(-1)
 	}
 	return err
@@ -330,12 +356,25 @@ func pushEntries(tcpAddress string, entries <-chan *Entry, logger Logger) error 
 	}
 	logger.Info("Start publish to nsqd")
 
+	doneChan := make(chan *nsq.ProducerTransaction)
+
+	go func() {
+		for d := range doneChan {
+			ReleaseEntry(d.Args[0].(*Entry))
+		}
+	}()
+
 	for entry := range entries {
-		b, err := MarshalEntry(entry)
+		if entry == nil {
+			continue
+		}
+		entry.serialized = serializePool.Get()
+		err := msgp.Encode(entry.serialized, entry)
 		if err != nil {
-			logger.Warn("Failed to message-pack encode entry", "error", err)
-		} else if b != nil {
-			err := p.PublishAsync("embedded", b, nil)
+			logger.Warn("Failed to message-pack entry", "error", err)
+			ReleaseEntry(entry)
+		} else {
+			err := p.PublishAsync("embedded", entry.serialized.B, doneChan, entry)
 			if err != nil {
 				return err
 			}

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tinylib/msgp/msgp"
 	"io"
 	"net"
 	"net/http"
@@ -36,6 +37,7 @@ import (
 )
 
 var Version string
+//var newLine = []byte("\n")
 
 func listenSignals(cancel context.CancelFunc) {
 	sigchan := make(chan os.Signal, 1)
@@ -58,9 +60,9 @@ func (p KafkaProducer) AsyncClose() {
 
 type RabbitMQChannel struct {
 	Connection *amqp.Connection
-	Channel   *amqp.Channel
-	Callbacks cmap.ConcurrentMap
-	Current   utomic.Uint64
+	Channel    *amqp.Channel
+	Callbacks  cmap.ConcurrentMap
+	Current    utomic.Uint64
 }
 
 type ElasticProcessor struct {
@@ -84,7 +86,7 @@ func BuildApp() *cli.App {
 
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
-			Name:   "loglevel",
+			Name:   "loglevel, log-level, level",
 			Usage:  "logging level",
 			EnvVar: "REAPER_LOGLEVEL",
 			Value:  "info",
@@ -105,7 +107,7 @@ func BuildApp() *cli.App {
 			EnvVar: "REAPER_UDP_ADDRESS",
 		},
 		cli.BoolFlag{
-			Name:   "rfc5424",
+			Name:   "rfc5424, newsyslog",
 			Usage:  "when receiving with syslog, use RFC5424 format",
 			EnvVar: "REAPER_RFC5424",
 		},
@@ -115,49 +117,54 @@ func BuildApp() *cli.App {
 			EnvVar: "REAPER_STDIN",
 		},
 		cli.StringFlag{
-			Name:   "nsqd-address",
+			Name:   "nsqd-address, nsqd-addr",
 			Usage:  "bind address for the embedded nsqd",
-			EnvVar: "REAPER_EMB_NSQD_ADDR",
+			EnvVar: "REAPER_NSQD_ADDR",
 			Value:  "127.0.0.1",
 		},
 		cli.IntFlag{
 			Name:   "nsqd-tcp-port",
 			Usage:  "TCP port for the embedded nsqd",
-			EnvVar: "REAPER_EMB_NSQD_TCP_PORT",
+			EnvVar: "REAPER_NSQD_TCP_PORT",
 			Value:  4150,
 		},
 		cli.IntFlag{
 			Name:   "nsqd-http-port",
 			Usage:  "HTTP port for the embedded nsqd",
-			EnvVar: "REAPER_EMB_NSQD_HTTP_PORT",
+			EnvVar: "REAPER_NSQD_HTTP_PORT",
 			Value:  4151,
 		},
+		cli.StringSliceFlag{
+			Name:   "lookupd-address, lookupd-addr, lookupd",
+			Usage:  "lookupd TCP address (may be given multiple times). if specified, the embedded nsqd connects to lookupd.",
+			EnvVar: "REAPER_NSQD_LOOKUPD",
+		},
 		cli.StringFlag{
-			Name:   "data-path",
+			Name:   "data-path, datapath",
 			Usage:  "data path for the embedded nsqd (change to a non-volatile location)",
-			EnvVar: "REAPER_EMB_NSQD_DATA_PATH",
+			EnvVar: "REAPER_NSQD_DATA_PATH",
 			Value:  "/tmp/reaper/nsqd",
 		},
 		cli.StringFlag{
-			Name:   "format",
+			Name:   "format, fmt",
 			Usage:  "access log format [json, kv, combined, common]",
 			Value:  "json",
-			EnvVar: "REAPER_ACCESS_LOG_FORMAT",
+			EnvVar: "REAPER_LOG_FORMAT",
 		},
 		cli.StringFlag{
-			Name:   "websocket-address",
+			Name:   "websocket-address, websocket-addr",
 			Usage:  "listen address for the websocket service (eg '127.0.0.1:8080', leave empty to disable)",
 			Value:  "",
 			EnvVar: "REAPER_WEBSOCKET_ADDRESS",
 		},
 		cli.StringFlag{
-			Name:   "http-address",
+			Name:   "http-address, http-addr",
 			Usage:  "listen address for the websocket service (eg '127.0.0.1:8080', leave empty to disable)",
 			Value:  "",
 			EnvVar: "REAPER_HTTP_ADDRESS",
 		},
 		cli.IntFlag{
-			Name:   "max-inflight",
+			Name:   "max-inflight, inflight",
 			Usage:  "maximum number of concurrent messages that will be sent downstream to destinations",
 			Value:  1000,
 			EnvVar: "REAPER_MAX_INFLIGHT",
@@ -330,16 +337,8 @@ func BuildApp() *cli.App {
 					if conn == nil {
 						return ErrNotConnected
 					}
-					b, err := JMarshalEntry(entry)
-					if err != nil {
-						return err
-					}
-					if b == nil {
-						ack(nil)
-						return nil
-					}
 					// TODO: async !
-					err = conn.(*stomp.Conn).Send(destination, "application/json", b, stomp.SendOpt.Receipt)
+					err := conn.(*stomp.Conn).Send(destination, "application/json", entry.serialized.B, stomp.SendOpt.Receipt)
 					if err == nil {
 						ack(nil)
 					}
@@ -699,8 +698,8 @@ func BuildApp() *cli.App {
 
 					channelRef.Store(&RabbitMQChannel{
 						Connection: conn,
-						Channel:   channel,
-						Callbacks: callbacks,
+						Channel:    channel,
+						Callbacks:  callbacks,
 					})
 					return nil
 				}
@@ -709,14 +708,6 @@ func BuildApp() *cli.App {
 					ch := getChannel()
 					if ch == nil {
 						return ErrNotConnected
-					}
-					b, err := JMarshalEntry(entry)
-					if err != nil {
-						return err
-					}
-					if b == nil {
-						ack(nil)
-						return nil
 					}
 
 					currentTag := strconv.FormatUint(ch.Current.Inc(), 10)
@@ -730,7 +721,7 @@ func BuildApp() *cli.App {
 						Timestamp:       time.Now(),
 						Type:            "accesslog",
 						AppId:           "reaper",
-						Body:            b,
+						Body:            entry.serialized.B,
 					}
 
 					//logger.Debug("Push to rabbitmq", "uid", entry.UID, "tag", currentTag)
@@ -888,14 +879,6 @@ func BuildApp() *cli.App {
 					if p == nil {
 						return ErrNotConnected
 					}
-					b, err := JMarshalEntry(entry)
-					if err != nil {
-						return err
-					}
-					if b == nil {
-						ack(nil)
-						return nil
-					}
 
 					p.Callbacks.Set(entry.UID, ack)
 
@@ -904,7 +887,7 @@ func BuildApp() *cli.App {
 							Index(indexName).
 							Type(indexName).
 							Id(entry.UID).
-							Doc(json.RawMessage(b)),
+							Doc(json.RawMessage(entry.serialized.B)),
 					)
 
 					return nil
@@ -996,15 +979,7 @@ func BuildApp() *cli.App {
 				reconnect := func(_ context.Context) error { return client.Ping().Err() }
 
 				h := func(hctx context.Context, entry *Entry, ack func(error)) error {
-					b, err := JMarshalEntry(entry)
-					if err != nil {
-						return err
-					}
-					if b == nil {
-						ack(nil)
-						return nil
-					}
-					err = client.RPush(listName, b).Err()
+					err := client.RPush(listName, entry.serialized.B).Err()
 					if err == nil {
 						ack(nil)
 					}
@@ -1114,17 +1089,9 @@ func BuildApp() *cli.App {
 					if p == nil {
 						return ErrNotConnected
 					}
-					b, err := JMarshalEntry(entry)
-					if err != nil {
-						return err
-					}
-					if b == nil {
-						ack(nil)
-						return nil
-					}
 					msg := &sarama.ProducerMessage{
 						Metadata: ack,
-						Value:    sarama.ByteEncoder(b),
+						Value:    sarama.ByteEncoder(entry.serialized.B),
 						Topic:    topic,
 					}
 					if entry.Host != "" {
@@ -1197,23 +1164,18 @@ func BuildApp() *cli.App {
 				p.SetLogger(AdaptLoggerNSQD(logger), nsq.LogLevelInfo)
 
 				h := func(hctx context.Context, entry *Entry, ack func(error)) error {
-					var (
-						b   []byte
-						err error
-					)
-					if exportJSON {
-						b, err = JMarshalEntry(entry)
-					} else {
-						b, err = MarshalEntry(entry)
+					if !exportJSON {
+						entry.serialized.Reset()
+						err = msgp.Encode(entry.serialized, entry)
+						if err != nil {
+							return err
+						}
 					}
-					if err != nil {
-						return err
-					}
-					if b == nil {
+					if entry.serialized.B == nil {
 						ack(nil)
 						return nil
 					}
-					return p.PublishAsync(topic, b, doneChan, ack)
+					return p.PublishAsync(topic, entry.serialized.B, doneChan, ack)
 				}
 
 				reconnect := func(_ context.Context) error {
@@ -1374,18 +1336,8 @@ func actionWriter(c *cli.Context, w io.Writer, gzipEnabled bool, gzipLevel int) 
 	h := func(hctx context.Context, entry *Entry, ack func(error)) error {
 		deadline.Store(time.Now().Add(time.Second))
 
-		b, err := JMarshalEntry(entry)
-		if err != nil {
-			logger.Error("Failed to JSON-marshal entry", "error", err)
-			return nil
-		}
-		if b == nil {
-			ack(nil)
-			return nil
-		}
-		b = append(b, '\n')
 		l.Lock()
-		_, err = writer.Write(b)
+		_, err := io.WriteString(writer, string(entry.serialized.B))
 		l.Unlock()
 		if err == nil {
 			ack(nil)
@@ -1394,10 +1346,6 @@ func actionWriter(c *cli.Context, w io.Writer, gzipEnabled bool, gzipLevel int) 
 		return err
 	}
 	return action(lctx, g, c, h, nil, logger)
-}
-
-func main() {
-	_ = BuildApp().Run(os.Args)
 }
 
 func cancelReconnect(reconnect func(context.Context) error) func(context.Context) error {
