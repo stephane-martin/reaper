@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tinylib/msgp/msgp"
 	"io"
 	"net"
 	"net/http"
@@ -21,6 +20,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tinylib/msgp/msgp"
+
 	"github.com/Shopify/sarama"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis"
@@ -29,7 +30,7 @@ import (
 	"github.com/lib/pq"
 	"github.com/nsqio/go-nsq"
 	"github.com/olivere/elastic"
-	"github.com/orcaman/concurrent-map"
+	cmap "github.com/orcaman/concurrent-map"
 	"github.com/streadway/amqp"
 	"github.com/urfave/cli"
 	utomic "go.uber.org/atomic"
@@ -37,6 +38,7 @@ import (
 )
 
 var Version string
+
 //var newLine = []byte("\n")
 
 func listenSignals(cancel context.CancelFunc) {
@@ -83,7 +85,6 @@ func BuildApp() *cli.App {
 	app.Version = Version
 	app.Usage = "access logs to queues"
 	app.Description = "reaper receives access logs from a web server and pushes the logs to an external message queue"
-
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:   "loglevel, log-level, level",

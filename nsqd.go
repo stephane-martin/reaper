@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/cenkalti/backoff"
-	"github.com/dop251/goja"
-	"github.com/tinylib/msgp/msgp"
 	"io/ioutil"
 	"net"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/cenkalti/backoff"
+	"github.com/dop251/goja"
+	"github.com/tinylib/msgp/msgp"
 
 	"github.com/nsqio/go-nsq"
 	"github.com/nsqio/nsq/nsqd"
@@ -166,6 +167,7 @@ func NSQD(ctx context.Context, opts *nsqd.Options, filterOut []string, incoming 
 		})
 	}
 	err = g.Wait()
+	<-ctx.Done()
 	logger.Info("Stopping NSQD")
 	daemon.Exit()
 	logger.Info("Stopped NSQD")
