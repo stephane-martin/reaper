@@ -1,6 +1,6 @@
 .POSIX:
 .SUFFIXES:
-.PHONY: debug release vet clean version staticcheck revive dockerbuild docker push all tag upload
+.PHONY: debug release vet clean version staticcheck revive dockerbuild docker push all tag upload install_vendor
 .SILENT: version dockerbuild
 
 SOURCES = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
@@ -15,6 +15,9 @@ LDFLAGS_RELEASE=-ldflags '-w -s -X main.Version=${VERSION} -X main.GinMode=relea
 
 debug: ${BINARY}_debug
 release: ${BINARY}
+
+install_vendor:
+	go install -i ./vendor/...
 
 tag:
 	dep ensure
