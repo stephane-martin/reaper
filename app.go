@@ -26,6 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis"
 	"github.com/go-stomp/stomp"
+	"github.com/google/renameio"
 	"github.com/gorilla/websocket"
 	"github.com/lib/pq"
 	"github.com/nsqio/go-nsq"
@@ -96,6 +97,12 @@ func BuildApp() *cli.App {
 			Name:   "syslog",
 			Usage:  "log to syslog",
 			EnvVar: "REAPER_SYSLOG",
+		},
+		cli.StringFlag{
+			Name:   "pidfile",
+			Usage:  "where to write the PID of the reaper process",
+			Value:  "/tmp/reaper.pid",
+			EnvVar: "REAPER_PIDFILE",
 		},
 		cli.StringSliceFlag{
 			Name:   "tcp",
@@ -1196,6 +1203,15 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 			err = cli.NewExitError(err.Error(), 1)
 		}
 	}()
+
+	pidFile := c.GlobalString("pidfile")
+	if pidFile != "" {
+		err := renameio.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0644)
+		if err != nil {
+			return err
+		}
+		defer os.Remove(pidFile)
+	}
 
 	nsqdOpts, err := buildNSQDOptions(c, logger)
 	if err != nil {

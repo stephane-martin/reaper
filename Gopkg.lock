@@ -196,6 +196,14 @@
   revision = "2e65f85255dbc3072edf28d6b5b8efc472979f5a"
 
 [[projects]]
+  branch = "master"
+  digest = "1:c3388642e07731a240e14f4bc7207df59cfcc009447c657b9de87fec072d07e3"
+  name = "github.com/google/renameio"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "f0e32980c006571efd537032e5f9cd8c1a92819e"
+
+[[projects]]
   digest = "1:7b5c6e2eeaa9ae5907c391a91c132abfd5c9e8a784a341b5625e750c67e6825d"
   name = "github.com/gorilla/websocket"
   packages = ["."]
@@ -571,6 +579,7 @@
     "github.com/gin-gonic/gin",
     "github.com/go-redis/redis",
     "github.com/go-stomp/stomp",
+    "github.com/google/renameio",
     "github.com/gorilla/websocket",
     "github.com/inconshreveable/log15",
     "github.com/influxdata/go-syslog",
