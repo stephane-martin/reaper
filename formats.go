@@ -129,7 +129,7 @@ func parseCombined(content string, e *Entry, logger Logger) error {
 	// Apache
 	// "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-agent}i\""
 
-	tokens := make([]string, 0, 12)
+	tokens := make([]string, 12)
 	var s scanner.Scanner
 	s.Error = func(_ *scanner.Scanner, msg string) {
 		logger.Debug("error in text scanner", "msg", msg)
@@ -147,8 +147,10 @@ func parseCombined(content string, e *Entry, logger Logger) error {
 		return false
 	}
 	s.Init(strings.NewReader(content))
-	for tok := s.Scan(); tok != scanner.EOF; tok = s.Scan() {
-		tokens = append(tokens, s.TokenText())
+	var i int
+	for tok := s.Scan(); tok != scanner.EOF && i <= 11; tok = s.Scan() {
+		tokens[i] = s.TokenText()
+		i++
 	}
 	e.SetString("remote_addr", tokens[0])
 	e.SetString("remote_user", tokens[2])
@@ -193,7 +195,7 @@ func parseCommon(content string, e *Entry, logger Logger) error {
 	// Caddy:
 	// {remote} - {user} [{when}] \"{method} {uri} {proto}\" {status} {size}
 
-	tokens := make([]string, 0, 10)
+	tokens := make([]string, 10)
 	var s scanner.Scanner
 	s.Error = func(_ *scanner.Scanner, msg string) {
 		logger.Debug("error in text scanner", "msg", msg)
@@ -211,8 +213,10 @@ func parseCommon(content string, e *Entry, logger Logger) error {
 		return false
 	}
 	s.Init(strings.NewReader(content))
-	for tok := s.Scan(); tok != scanner.EOF; tok = s.Scan() {
-		tokens = append(tokens, s.TokenText())
+	var i int
+	for tok := s.Scan(); tok != scanner.EOF && i <= 9; tok = s.Scan() {
+		tokens[i] = s.TokenText()
+		i++
 	}
 	e.SetString("remote_addr", tokens[0])
 	e.SetString("remote_user", tokens[2])

@@ -2,11 +2,14 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/influxdata/go-syslog"
@@ -15,8 +18,47 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func Listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Format, useRFC5424 bool, entries chan<- *Entry, l Logger) error {
+type timeoutI interface {
+	Timeout() bool
+}
+
+func isTimeout(err error) bool {
+	if e, ok := err.(timeoutI); ok {
+		return e.Timeout()
+	}
+	return false
+}
+
+type timeoutReader struct {
+	callback    func()
+	setDeadline func()
+	reader      io.Reader
+}
+
+func (r *timeoutReader) Read(p []byte) (int, error) {
+	r.setDeadline()
+	n, err := r.reader.Read(p)
+	if err != nil {
+		if isTimeout(err) {
+			r.callback()
+			return n, nil
+		}
+	}
+	return n, err
+}
+
+func flushCache(cache *[]*Entry, c chan<- []*Entry) {
+	if len(*cache) > 0 {
+		copyCache := make([]*Entry, len(*cache))
+		copy(copyCache, *cache)
+		*cache = (*cache)[0:0]
+		c <- copyCache
+	}
+}
+
+func Listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Format, useRFC5424 bool, entries chan<- []*Entry, l Logger) error {
 	defer close(entries)
+
 	g, lctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		return listenTCP(lctx, tcp, f, useRFC5424, entries, l)
@@ -24,36 +66,82 @@ func Listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Forma
 	g.Go(func() error {
 		return listenUDP(lctx, udp, f, useRFC5424, entries, l)
 	})
+
 	if stdin {
+		infos, err := os.Stdin.Stat()
+		if err != nil {
+			return err
+		}
+		mode := infos.Mode()
+		if mode&os.ModeCharDevice != 0 && infos.Size() != 0 {
+			l.Warn("--stdin does not work for such input")
+			return g.Wait()
+		}
+		if mode.IsRegular() {
+			l.Warn("--stdin does not work for such input")
+			return g.Wait()
+		}
+
+		err = syscall.SetNonblock(0, true)
+		if err != nil {
+			l.Warn("stdin can not be set to non-blocking", "error", err)
+			return g.Wait()
+		}
+		stdin := os.NewFile(0, "stdin")
 		g.Go(func() error {
-			s := WithContext(lctx, bufio.NewScanner(os.Stdin))
-		L:
-			for s.Scan() {
+			<-lctx.Done()
+			_ = os.Stdin.Close()
+			return nil
+		})
+
+		g.Go(func() error {
+			cache := make([]*Entry, 0, 1024)
+			defer flushCache(&cache, entries)
+
+			reader := bufio.NewReader(&timeoutReader{
+				reader: stdin,
+				callback: func() {
+					flushCache(&cache, entries)
+				},
+				setDeadline: func() {
+					stdin.SetReadDeadline(time.Now().Add(time.Second))
+				},
+			})
+
+			var readError error
+			var line []byte
+
+			for {
+				if readError != nil {
+					l.Info("Error scanning stdin", "error", readError)
+					return nil
+				}
+				line, readError = reader.ReadBytes('\n')
+
+				line = bytes.TrimSpace(line)
+				if len(line) == 0 {
+					continue
+				}
 				Metrics.Incoming.WithLabelValues("", "stdin").Inc()
+
 				e := NewEntry()
-				err := ParseAccessLogLine(f, s.Text(), e, l)
+				err = ParseAccessLogLine(f, string(line), e, l)
 				if err != nil {
 					l.Warn("Failed to parse access log", "error", err)
-					continue L
+					continue
 				}
-				select {
-				case <-lctx.Done():
-					return ctx.Err()
-				case entries <- e:
+				cache = append(cache, e)
+				if len(cache) == 1024 {
+					flushCache(&cache, entries)
 				}
 			}
-			err := s.Err()
-			if err != nil {
-				l.Info("Error scanning stdin", "error", err)
-			}
-			return nil
 		})
 
 	}
 	return g.Wait()
 }
 
-func listenUDP(ctx context.Context, udp []string, f Format, useRFC5424 bool, entries chan<- *Entry, l Logger) error {
+func listenUDP(ctx context.Context, udp []string, f Format, useRFC5424 bool, entries chan<- []*Entry, l Logger) error {
 	g, lctx := errgroup.WithContext(ctx)
 
 	for _, udpAddr := range udp {
@@ -119,7 +207,7 @@ func listenUDP(ctx context.Context, udp []string, f Format, useRFC5424 bool, ent
 	return nil
 }
 
-func listenTCP(ctx context.Context, tcp []string, f Format, useRFC5424 bool, entries chan<- *Entry, l Logger) error {
+func listenTCP(ctx context.Context, tcp []string, f Format, useRFC5424 bool, entries chan<- []*Entry, l Logger) error {
 	g, lctx := errgroup.WithContext(ctx)
 
 	for _, tcpAddr := range tcp {
@@ -198,7 +286,10 @@ func listenTCP(ctx context.Context, tcp []string, f Format, useRFC5424 bool, ent
 	return nil
 }
 
-func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, entries chan<- *Entry, l Logger) error {
+func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, entries chan<- []*Entry, l Logger) error {
+	cache := make([]*Entry, 0, 1024)
+	defer flushCache(&cache, entries)
+
 	if useRFC5424 {
 		p := nontransparent.NewParser(
 			syslog.WithBestEffort(),
@@ -231,23 +322,51 @@ func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, en
 				if len(entry.Fields) == 0 {
 					return
 				}
-				select {
-				case <-ctx.Done():
-				case entries <- entry:
+				cache = append(cache, entry)
+				if len(cache) == 1024 {
+					flushCache(&cache, entries)
 				}
 			}),
 		)
-		p.Parse(conn)
+		p.Parse(&timeoutReader{
+			reader: conn,
+			callback: func() {
+				flushCache(&cache, entries)
+			},
+			setDeadline: func() {
+				conn.SetReadDeadline(time.Now().Add(time.Second))
+			},
+		})
+
 		return nil
 	}
 
-	scanner := bufio.NewScanner(conn)
-	for scanner.Scan() {
+	reader := bufio.NewReader(conn)
+	fullLine := make([]byte, 0, 1024)
+
+	for {
+		err := conn.SetReadDeadline(time.Now().Add(time.Second))
+		if err != nil {
+			return err
+		}
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			if isTimeout(err) {
+				fullLine = append(fullLine, line...)
+				flushCache(&cache, entries)
+				continue
+			}
+			return err
+		}
+
 		Metrics.Incoming.WithLabelValues(conn.RemoteAddr().String(), "tcp").Inc()
-		entry, err := parseRFC3164(scanner.Bytes(), f, l)
+
+		fullLine = append(fullLine, line...)
+		entry, err := parseRFC3164(fullLine, f, l)
+		fullLine = fullLine[0:0]
 		if err != nil {
 			if _, ok := err.(ErrProtocolSyslog); ok {
-				return fmt.Errorf("Failed to parse TCP/RFC3164 message: %s", err)
+				return fmt.Errorf("Failed to parse TCP/RFC3164: %s", err)
 			}
 			l.Info("Failed to parse access log entry from TCP/RFC3164", "error", err)
 			continue
@@ -258,17 +377,11 @@ func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, en
 		if len(entry.Fields) == 0 {
 			continue
 		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case entries <- entry:
+		cache = append(cache, entry)
+		if len(cache) == 1024 {
+			flushCache(&cache, entries)
 		}
 	}
-	err := scanner.Err()
-	if err != nil {
-		return fmt.Errorf("TCP/RFC3164 stream scan error: %s", err)
-	}
-	return nil
 }
 
 var rfc5424Parser = rfc5424.NewParser(rfc5424.WithBestEffort())
@@ -329,7 +442,10 @@ func parseRFC3164(buf []byte, f Format, l Logger) (*Entry, error) {
 	return entry, nil
 }
 
-func handleUDP(ctx context.Context, conn net.PacketConn, f Format, useRFC5424 bool, entries chan<- *Entry, l Logger) error {
+func handleUDP(ctx context.Context, conn net.PacketConn, f Format, useRFC5424 bool, entries chan<- []*Entry, l Logger) error {
+	cache := make([]*Entry, 0, 1024)
+	defer flushCache(&cache, entries)
+
 	buf := make([]byte, 65536)
 	var (
 		addr      net.Addr
@@ -346,7 +462,7 @@ func handleUDP(ctx context.Context, conn net.PacketConn, f Format, useRFC5424 bo
 	}
 
 	for {
-		_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(time.Second))
 		n, addr, err = conn.ReadFrom(buf)
 		if n > 0 {
 			Metrics.Incoming.WithLabelValues(addr.String(), "udp").Inc()
@@ -367,21 +483,17 @@ func handleUDP(ctx context.Context, conn net.PacketConn, f Format, useRFC5424 bo
 			}
 			entry.SetString("syslog_remote_addr", addr.String())
 
-			select {
-			case <-ctx.Done():
-				return nil
-			case entries <- entry:
+			cache = append(cache, entry)
+			if len(cache) == 1024 {
+				flushCache(&cache, entries)
 			}
 		}
-		if err != nil && !isNetTimeout(err) {
-			return err
+		if err != nil {
+			if isTimeout(err) {
+				flushCache(&cache, entries)
+			} else {
+				return err
+			}
 		}
 	}
-}
-
-func isNetTimeout(e error) bool {
-	if err, ok := e.(net.Error); ok {
-		return err.Timeout()
-	}
-	return false
 }

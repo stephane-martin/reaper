@@ -82,7 +82,7 @@ func WaitNSQD(ctx context.Context) error {
 	}
 }
 
-func NSQD(ctx context.Context, opts *nsqd.Options, filterOut []string, incoming <-chan *Entry, h Handler, reconnect func(context.Context) error, maxInFlight int, logger Logger) error {
+func NSQD(ctx context.Context, opts *nsqd.Options, filterOut []string, incoming <-chan []*Entry, h Handler, reconnect func(context.Context) error, maxInFlight int, logger Logger) error {
 	if maxInFlight <= 0 {
 		maxInFlight = 1000
 	}
@@ -343,7 +343,7 @@ func pullEntries(ctx context.Context, cID, chnl, nsqAddr string, h Handler, filt
 	}
 }
 
-func pushEntries(tcpAddress string, entries <-chan *Entry, logger Logger) error {
+func pushEntries(tcpAddress string, entriesBatches <-chan []*Entry, logger Logger) error {
 	cfg := nsq.NewConfig()
 	cfg.ClientID = "reaper_producer"
 	p, err := nsq.NewProducer(tcpAddress, cfg)
@@ -361,23 +361,36 @@ func pushEntries(tcpAddress string, entries <-chan *Entry, logger Logger) error 
 
 	go func() {
 		for d := range doneChan {
-			ReleaseEntry(d.Args[0].(*Entry))
+			for _, entry := range d.Args[0].([]*Entry) {
+				ReleaseEntry(entry)
+			}
 		}
 	}()
 
-	for entry := range entries {
-		if entry == nil {
+	for batch := range entriesBatches {
+		if len(batch) == 0 {
 			continue
 		}
-		entry.serialized, err = entry.MarshalMsg(getBuffer())
-		if err != nil {
-			logger.Warn("Failed to message-pack entry", "error", err)
-			ReleaseEntry(entry)
-		} else {
-			err := p.PublishAsync("embedded", entry.serialized, doneChan, entry)
-			if err != nil {
-				return err
+		serialized := make([][]byte, 0, len(batch))
+		goodOnes := batch[:0]
+		for _, entry := range batch {
+			ser, err := entry.MarshalMsg(getBuffer())
+			if err == nil {
+				entry.serialized = ser
+				serialized = append(serialized, ser)
+				goodOnes = append(goodOnes, entry)
+			} else {
+				ReleaseEntry(entry)
+				logger.Warn("Failed to message-pack entry", "error", err)
 			}
+		}
+
+		if len(goodOnes) == 0 {
+			continue
+		}
+		err := p.MultiPublishAsync("embedded", serialized, doneChan, goodOnes)
+		if err != nil {
+			return err
 		}
 	}
 	p.Stop()
