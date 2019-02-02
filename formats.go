@@ -1,14 +1,15 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
-	"github.com/urfave/cli"
 	"strconv"
 	"strings"
 	"text/scanner"
 	"time"
 	"unicode"
+
+	"github.com/urfave/cli"
+	"github.com/valyala/fastjson"
 )
 
 type Format int
@@ -23,10 +24,10 @@ const (
 type AccessLogParser func(string, *Entry, Logger) error
 
 var parsers = map[Format]AccessLogParser{
-	JSON: parseJSON,
+	JSON:      parseJSON,
 	KeyValues: parseKV,
-	Combined: parseCombined,
-	Common: parseCommon,
+	Combined:  parseCombined,
+	Common:    parseCommon,
 }
 
 func GetFormat(c *cli.Context) (Format, error) {
@@ -59,7 +60,6 @@ func parseKV(content string, e *Entry, logger Logger) error {
 	var t, key, value string
 	var expectKey, expectValue, expectEqual bool
 	var fl float64
-	var in int64
 	var err error
 
 	expectKey = true
@@ -68,7 +68,7 @@ func parseKV(content string, e *Entry, logger Logger) error {
 		logger.Debug("error in text scanner", "msg", msg)
 	}
 
-	L:
+L:
 	for tok := s.Scan(); tok != scanner.EOF; tok = s.Scan() {
 		t = s.TokenText()
 		if expectKey {
@@ -100,19 +100,10 @@ func parseKV(content string, e *Entry, logger Logger) error {
 				value = ""
 				continue L
 			}
-			if value == `"_"` || value == `"-"` {
-				e.Set(key, "")
-				key = ""
-				value = ""
-				continue L
-			}
 			if value[0] == '"' {
 				value, err = strconv.Unquote(value)
 				if err == nil {
-					if value == "-" || value == "_" {
-						value = ""
-					}
-					e.Set(key, value)
+					e.SetString(key, value)
 				}
 				key = ""
 				value = ""
@@ -120,14 +111,7 @@ func parseKV(content string, e *Entry, logger Logger) error {
 			}
 			fl, err = strconv.ParseFloat(value, 64)
 			if err == nil {
-				e.Set(key, fl)
-			} else {
-				in, err = strconv.ParseInt(value, 10, 64)
-				if err == nil {
-					e.Set(key, in)
-				} else {
-					e.Set(key, value)
-				}
+				e.Fields[key] = NewFloatValue(fl)
 			}
 			key = ""
 			value = ""
@@ -144,7 +128,6 @@ func parseCombined(content string, e *Entry, logger Logger) error {
 
 	// Apache
 	// "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-agent}i\""
-
 
 	tokens := make([]string, 0, 12)
 	var s scanner.Scanner
@@ -167,33 +150,31 @@ func parseCombined(content string, e *Entry, logger Logger) error {
 	for tok := s.Scan(); tok != scanner.EOF; tok = s.Scan() {
 		tokens = append(tokens, s.TokenText())
 	}
-	e.Set("remote_addr", tokens[0])
-	e.Set("remote_user", tokens[2])
-	t, err := time.Parse("02/Jan/2006:15:04:05 -0700", tokens[4] + " " + tokens[5])
+	e.SetString("remote_addr", tokens[0])
+	e.SetString("remote_user", tokens[2])
+	t, err := time.Parse("02/Jan/2006:15:04:05 -0700", tokens[4]+" "+tokens[5])
 	if err == nil {
-		e.Set("time_local", t.Format(time.RFC3339))
+		e.SetString("time_local", t.Format(time.RFC3339))
 	}
 	req, err := strconv.Unquote(tokens[7])
 	if err == nil {
-		e.Set("request", req)
+		e.SetString("request", req)
 	}
 	status, err := strconv.ParseInt(tokens[8], 10, 64)
 	if err == nil {
-		e.Set("status", status)
+		e.Fields["status"] = NewFloatValue(float64(status))
 	}
 	bytesBodySent, err := strconv.ParseInt(tokens[9], 10, 64)
 	if err == nil {
-		e.Set("bytes_body_sent", bytesBodySent)
-	} else {
-		e.Set("bytes_body_sent", int(0))
+		e.Fields["bytes_body_sent"] = NewFloatValue(float64(bytesBodySent))
 	}
 	referer, err := strconv.Unquote(tokens[10])
 	if err == nil {
-		e.Set("referer", referer)
+		e.SetString("referer", referer)
 	}
 	userAgent, err := strconv.Unquote(tokens[11])
 	if err == nil {
-		e.Set("user_agent", userAgent)
+		e.SetString("user_agent", userAgent)
 	}
 	return nil
 }
@@ -233,47 +214,52 @@ func parseCommon(content string, e *Entry, logger Logger) error {
 	for tok := s.Scan(); tok != scanner.EOF; tok = s.Scan() {
 		tokens = append(tokens, s.TokenText())
 	}
-	e.Set("remote_addr", tokens[0])
-	e.Set("remote_user", tokens[2])
-	t, err := time.Parse("02/Jan/2006:15:04:05 -0700", tokens[4] + " " + tokens[5])
+	e.SetString("remote_addr", tokens[0])
+	e.SetString("remote_user", tokens[2])
+	t, err := time.Parse("02/Jan/2006:15:04:05 -0700", tokens[4]+" "+tokens[5])
 	if err == nil {
-		e.Set("time_local", t.Format(time.RFC3339))
+		e.SetString("time_local", t.Format(time.RFC3339))
 	}
 	req, err := strconv.Unquote(tokens[7])
 	if err == nil {
-		e.Set("request", req)
+		e.SetString("request", req)
 	}
 	status, err := strconv.ParseInt(tokens[8], 10, 64)
 	if err == nil {
-		e.Set("status", status)
+		e.Fields["status"] = NewFloatValue(float64(status))
 	}
 	bytesBodySent, err := strconv.ParseInt(tokens[9], 10, 64)
 	if err == nil {
-		e.Set("bytes_body_sent", bytesBodySent)
-	} else {
-		e.Set("bytes_body_sent", int(0))
+		e.Fields["bytes_body_sent"] = NewFloatValue(float64(bytesBodySent))
 	}
 
 	return nil
 }
 
 func parseJSON(content string, e *Entry, _ Logger) error {
-	fields := make(map[string]interface{})
-	err := json.Unmarshal([]byte(content), &fields)
+	var p fastjson.Parser
+
+	v, err := p.Parse(content)
 	if err != nil {
 		return err
 	}
-	for k, v := range fields {
-		if v != nil {
-			if s, ok := v.(string); ok {
-				s = strings.TrimSpace(s)
-				if s != "" && s != "-" && s != "_" {
-					e.Set(k, s)
-				}
-			} else {
-				e.Set(k, v)
-			}
-		}
+	o, err := v.Object()
+	if err != nil {
+		return err
 	}
+
+	o.Visit(func(k []byte, v *fastjson.Value) {
+		switch v.Type() {
+		case fastjson.TypeString:
+			e.SetBytes(string(k), v.GetStringBytes())
+		case fastjson.TypeNumber:
+			e.Fields[string(k)] = NewFloatValue(v.GetFloat64())
+		case fastjson.TypeTrue:
+			e.Fields[string(k)] = trueValue
+		case fastjson.TypeFalse:
+			e.Fields[string(k)] = falseValue
+		}
+	})
+
 	return nil
 }

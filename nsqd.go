@@ -12,7 +12,6 @@ import (
 
 	"github.com/cenkalti/backoff"
 	"github.com/dop251/goja"
-	"github.com/tinylib/msgp/msgp"
 
 	"github.com/nsqio/go-nsq"
 	"github.com/nsqio/nsq/nsqd"
@@ -238,7 +237,7 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 		message.Finish()
 		return nil
 	}
-	if entry.serialized.B == nil {
+	if len(entry.serialized) == 0 {
 		h.logger.Debug("Empty message ?!")
 		ReleaseEntry(entry)
 		message.Finish()
@@ -370,13 +369,12 @@ func pushEntries(tcpAddress string, entries <-chan *Entry, logger Logger) error 
 		if entry == nil {
 			continue
 		}
-		entry.serialized = serializePool.Get()
-		err := msgp.Encode(entry.serialized, entry)
+		entry.serialized, err = entry.MarshalMsg(getBuffer())
 		if err != nil {
 			logger.Warn("Failed to message-pack entry", "error", err)
 			ReleaseEntry(entry)
 		} else {
-			err := p.PublishAsync("embedded", entry.serialized.B, doneChan, entry)
+			err := p.PublishAsync("embedded", entry.serialized, doneChan, entry)
 			if err != nil {
 				return err
 			}

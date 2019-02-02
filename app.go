@@ -20,8 +20,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tinylib/msgp/msgp"
-
 	"github.com/Shopify/sarama"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis"
@@ -40,7 +38,7 @@ import (
 
 var Version string
 
-//var newLine = []byte("\n")
+var newLine = []byte("\n")
 
 func listenSignals(cancel context.CancelFunc) {
 	sigchan := make(chan os.Signal, 1)
@@ -346,7 +344,7 @@ func BuildApp() *cli.App {
 						return ErrNotConnected
 					}
 					// TODO: async !
-					err := conn.(*stomp.Conn).Send(destination, "application/json", entry.serialized.B, stomp.SendOpt.Receipt)
+					err := conn.(*stomp.Conn).Send(destination, "application/json", entry.serialized, stomp.SendOpt.Receipt)
 					if err == nil {
 						ack(nil)
 					}
@@ -416,9 +414,11 @@ func BuildApp() *cli.App {
 
 				fieldNames := make([]string, 0)
 				for _, f := range strings.Split(c.String("fields"), ",") {
-					fieldNames = append(fieldNames, strings.TrimSpace(f))
+					f = strings.TrimSpace(f)
+					if f != "" {
+						fieldNames = append(fieldNames, pq.QuoteIdentifier(f))
+					}
 				}
-				// todo: validate fieldNames
 
 				makeQuery := func(fields []interface{}) (string, []interface{}) {
 					selectFieldNames := make([]string, 0, len(fieldNames))
@@ -729,7 +729,7 @@ func BuildApp() *cli.App {
 						Timestamp:       time.Now(),
 						Type:            "accesslog",
 						AppId:           "reaper",
-						Body:            entry.serialized.B,
+						Body:            entry.serialized,
 					}
 
 					//logger.Debug("Push to rabbitmq", "uid", entry.UID, "tag", currentTag)
@@ -895,7 +895,7 @@ func BuildApp() *cli.App {
 							Index(indexName).
 							Type(indexName).
 							Id(entry.UID).
-							Doc(json.RawMessage(entry.serialized.B)),
+							Doc(json.RawMessage(entry.serialized)),
 					)
 
 					return nil
@@ -987,7 +987,7 @@ func BuildApp() *cli.App {
 				reconnect := func(_ context.Context) error { return client.Ping().Err() }
 
 				h := func(hctx context.Context, entry *Entry, ack func(error)) error {
-					err := client.RPush(listName, entry.serialized.B).Err()
+					err := client.RPush(listName, entry.serialized).Err()
 					if err == nil {
 						ack(nil)
 					}
@@ -1099,7 +1099,7 @@ func BuildApp() *cli.App {
 					}
 					msg := &sarama.ProducerMessage{
 						Metadata: ack,
-						Value:    sarama.ByteEncoder(entry.serialized.B),
+						Value:    sarama.ByteEncoder(entry.serialized),
 						Topic:    topic,
 					}
 					if entry.Host != "" {
@@ -1172,18 +1172,19 @@ func BuildApp() *cli.App {
 				p.SetLogger(AdaptLoggerNSQD(logger), nsq.LogLevelInfo)
 
 				h := func(hctx context.Context, entry *Entry, ack func(error)) error {
+					var err error
 					if !exportJSON {
-						entry.serialized.Reset()
-						err = msgp.Encode(entry.serialized, entry)
+						entry.serialized = entry.serialized[:0]
+						entry.serialized, err = entry.MarshalMsg(entry.serialized)
 						if err != nil {
 							return err
 						}
 					}
-					if entry.serialized.B == nil {
+					if len(entry.serialized) == 0 {
 						ack(nil)
 						return nil
 					}
-					return p.PublishAsync(topic, entry.serialized.B, doneChan, ack)
+					return p.PublishAsync(topic, entry.serialized, doneChan, ack)
 				}
 
 				reconnect := func(_ context.Context) error {
@@ -1354,7 +1355,10 @@ func actionWriter(c *cli.Context, w io.Writer, gzipEnabled bool, gzipLevel int) 
 		deadline.Store(time.Now().Add(time.Second))
 
 		l.Lock()
-		_, err := io.WriteString(writer, string(entry.serialized.B))
+		_, err := io.WriteString(writer, string(entry.serialized))
+		if err == nil {
+			_, err = writer.Write(newLine)
+		}
 		l.Unlock()
 		if err == nil {
 			ack(nil)

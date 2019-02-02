@@ -124,7 +124,7 @@ func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAd
 			select {
 			case <-hctx.Done():
 				return ErrPullFinished
-			case entries <- EntryACK{Entry: string(e.serialized.B), ACK: ack}:
+			case entries <- EntryACK{Entry: string(e.serialized), ACK: ack}:
 				return nil
 			}
 		}
@@ -156,6 +156,9 @@ func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAd
 						return nil
 					}
 					_, err = io.WriteString(c.Writer, entryACK.Entry)
+					if err == nil {
+						_, err = c.Writer.Write(newLine)
+					}
 					entryACK.ACK(err)
 					if err != nil {
 						return err

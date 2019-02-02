@@ -28,11 +28,11 @@ type RFC5424Message struct {
 	Priority int
 	Facility int
 	Severity int
-	Time *time.Time
+	Time     *time.Time
 	HostName string
-	AppName string
-	ProcID string
-	Message string
+	AppName  string
+	ProcID   string
+	Message  string
 }
 
 var (
@@ -70,8 +70,7 @@ func p3164(m []byte) (*RFC5424Message, error) {
 	if len(m) == 0 {
 		return nil, ErrEmptyMessage
 	}
-
-	s := bytes.Split(m, space)
+	s := bytes.Fields(m)
 	if m[0] >= byte('0') && m[0] <= byte('9') {
 		// RFC3339
 		s0 := string(s[0])
@@ -94,7 +93,8 @@ func p3164(m []byte) (*RFC5424Message, error) {
 		if len(s) < 3 {
 			return nil, ErrBadTimestamp
 		}
-		t, e := time.ParseInLocation(time.Stamp, string(bytes.Join(s[0:3], space)), time.Local)
+		ts := string(bytes.Join(s[0:3], space))
+		t, e := time.ParseInLocation(time.Stamp, ts, time.Local)
 		if e != nil {
 			return nil, ErrBadTimestamp
 		}
@@ -177,4 +177,3 @@ func isHostname(s []byte) bool {
 	}
 	return true
 }
-

@@ -3,14 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/elazarl/go-bindata-assetfs"
-	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
-	"golang.org/x/sync/errgroup"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
+
+	assetfs "github.com/elazarl/go-bindata-assetfs"
+	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
+	"golang.org/x/sync/errgroup"
 )
 
 var GinMode string
@@ -65,7 +66,7 @@ func WebsocketRoutes(ctx context.Context, router *gin.Engine, nsqdAddr string, f
 			select {
 			case <-hctx.Done():
 				return ErrPullFinished
-			case entries <- string(e.serialized.B):
+			case entries <- string(e.serialized):
 				ack(nil)
 				return nil
 			}

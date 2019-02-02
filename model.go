@@ -1,10 +1,16 @@
 package main
 
-import "github.com/valyala/bytebufferpool"
-
 type Entry struct {
-	UID        string                     `msg:"uid"`
-	Host       string                     `msg:"host"`
-	Fields     map[string]interface{}     `msg:"fields"`
-	serialized *bytebufferpool.ByteBuffer `msg:"-" json:"-"`
+	UID        string `msg:"uid"`
+	Host       string `msg:"host"`
+	Fields     Fields `msg:"fields"`
+	serialized []byte `msg:"-"`
+}
+
+type Fields map[string]Value
+
+type Value struct {
+	S []byte
+	B *bool
+	F *float64
 }
