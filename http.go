@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -44,7 +46,7 @@ type EntryACK struct {
 	ACK   func(error)
 }
 
-func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAddr string, filterOut []string, logger Logger) {
+func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAddr string, filterOut []string, frmt Format, entries chan<- []*Entry, logger Logger) {
 
 	router.GET("/status", func(c *gin.Context) {
 		c.Status(200)
@@ -62,6 +64,45 @@ func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAd
 			},
 		),
 	))
+
+	router.POST("/upload", func(c *gin.Context) {
+
+	})
+
+	router.POST("/uploadfile", func(c *gin.Context) {
+		h, err := c.FormFile("file")
+		if err != nil {
+			_ = c.AbortWithError(400, err)
+			return
+		}
+		f, err := h.Open()
+		if err != nil {
+			_ = c.AbortWithError(500, err)
+			return
+		}
+		defer f.Close()
+		s := bufio.NewScanner(f)
+
+		all := make([]*Entry, 0)
+		for s.Scan() {
+			entry := NewEntry()
+			err := ParseAccessLogLine(frmt, strings.TrimSpace(s.Text()), entry, logger)
+			if err == nil {
+				if len(entry.Fields) > 0 {
+					entry.SetString("client_ip", c.ClientIP())
+					Metrics.Incoming.WithLabelValues(c.ClientIP(), "http").Inc()
+					all = append(all, entry)
+				} else {
+					ReleaseEntry(entry)
+				}
+			} else {
+				ReleaseEntry(entry)
+			}
+		}
+		if len(all) > 0 {
+			entries <- all
+		}
+	})
 
 	router.DELETE("/download/:clientid", func(c *gin.Context) {
 		clientID := c.Param("clientid")

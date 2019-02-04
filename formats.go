@@ -51,6 +51,12 @@ func ParseAccessLogLine(f Format, content string, e *Entry, logger Logger) error
 	if p == nil {
 		return errors.New("unknown access log format")
 	}
+	if content == "" {
+		return ErrEmptyMessage
+	}
+	if content[0] == '#' {
+		return ErrEmptyMessage
+	}
 	return p(content, e, logger)
 }
 

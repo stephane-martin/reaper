@@ -1237,15 +1237,26 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	var httpRoutes, websocketRoutes *gin.Engine
 	var httpListener, websocketListener net.Listener
 
+	loggingMiddleware := gin.LoggerWithConfig(
+		gin.LoggerConfig{
+			Output: &GinLogger{
+				Logger: logger,
+			},
+			Formatter: ginLogsFormatter,
+		},
+	)
+
 	if httpAddr != "" {
-		httpRoutes = gin.Default()
-		HTTPRoutes(ctx, httpRoutes, nsqdOpts.TCPAddress, nsqdOpts.HTTPAddress, filterOut, logger)
+		httpRoutes = gin.New()
+		httpRoutes.Use(loggingMiddleware, gin.Recovery())
+		HTTPRoutes(ctx, httpRoutes, nsqdOpts.TCPAddress, nsqdOpts.HTTPAddress, filterOut, format, incoming, logger)
 	}
 
 	if websocketAddr != "" {
 		websocketRoutes = httpRoutes
 		if websocketAddr != httpAddr {
-			websocketRoutes = gin.Default()
+			websocketRoutes = gin.New()
+			websocketRoutes.Use(loggingMiddleware, gin.Recovery())
 		}
 		WebsocketRoutes(ctx, websocketRoutes, nsqdOpts.TCPAddress, filterOut, logger)
 	}

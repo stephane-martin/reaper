@@ -121,17 +121,17 @@
   revision = "a7658810eb745c2f22927282dea478278103a897"
 
 [[projects]]
-  digest = "1:d5083934eb25e45d17f72ffa86cae3814f4a9d6c073c4f16b64147169b245606"
+  branch = "master"
+  digest = "1:8284c199bc9f5c75da71578c0c68481f465d075c4f2faf8fd2756eee0b4f2f6d"
   name = "github.com/gin-gonic/gin"
   packages = [
     ".",
     "binding",
-    "json",
+    "internal/json",
     "render",
   ]
   pruneopts = "UT"
-  revision = "b869fe1415e4b9eb52f247441830d502aece2d4d"
-  version = "v1.3.0"
+  revision = "5acf6601170bb49a1958c055d66d54ba152dc34b"
 
 [[projects]]
   digest = "1:ad53d1f710522a38d1f0e5e0a55a194b1c6b2cd8e84313568e43523271f0cf62"

@@ -3,6 +3,12 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"log"
+	"log/syslog"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/Shopify/sarama"
 	"github.com/gin-gonic/gin"
 	"github.com/inconshreveable/log15"
@@ -10,11 +16,6 @@ import (
 	"github.com/olivere/elastic"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/urfave/cli"
-	"log"
-	"log/syslog"
-	"strconv"
-	"strings"
-	"time"
 )
 
 type Logger struct {
@@ -81,13 +82,11 @@ func AdaptInfoLoggerElasticsearch(l Logger) elastic.Logger {
 	return adaptedInfoElastic{Logger: l}
 }
 
-
 func AdaptLoggerPrometheus(l Logger) promhttp.Logger {
 	return &adaptedPrometheus{
 		Logger: l,
 	}
 }
-
 
 func (l adaptedNSQD) Output(maxDepth int, s string) error {
 	if len(s) < 5 {
@@ -217,7 +216,6 @@ func escapeString(s string, buf *bytes.Buffer) {
 	}
 }
 
-
 func NewLogger(c *cli.Context) Logger {
 	loglevel := c.GlobalString("loglevel")
 	useSyslog := c.GlobalBool("syslog")
@@ -226,7 +224,7 @@ func NewLogger(c *cli.Context) Logger {
 
 	if useSyslog {
 		h, err := log15.SyslogHandler(
-			syslog.LOG_DAEMON | syslog.LOG_INFO,
+			syslog.LOG_DAEMON|syslog.LOG_INFO,
 			"reaper",
 			syslogFormat(),
 		)
@@ -256,6 +254,7 @@ func initGinLogging(l log15.Logger) {
 	wr := &GinLogger{Logger: l}
 	gin.DefaultWriter = wr
 	gin.DefaultErrorWriter = wr
+	gin.DebugPrintRouteFunc = func(httpMethod, absolutePath, handlerName string, nuHandlers int) {}
 	log.SetOutput(wr)
 }
 
@@ -265,8 +264,18 @@ type GinLogger struct {
 
 func (w GinLogger) Write(b []byte) (int, error) {
 	l := len(b)
-	dolog := w.Logger.Info
 	b = bytes.TrimSpace(b)
+	if bytes.HasPrefix(b, []byte("[http]")) {
+		parts := bytes.Split(b[6:], []byte{'|'})
+		if len(parts) == 5 {
+			if len(parts[4]) > 0 {
+				w.Logger.Debug("[http]", "status", string(parts[0]), "client", string(parts[1]), "method", string(parts[2]), "path", string(parts[3]), "error", string(parts[4]))
+			} else {
+				w.Logger.Debug("[http]", "status", string(parts[0]), "client", string(parts[1]), "method", string(parts[2]), "path", string(parts[3]))
+			}
+		}
+		return l, nil
+	}
 	b = bytes.Replace(b, []byte{'\t'}, []byte{' '}, -1)
 	b = bytes.Replace(b, []byte{'"'}, []byte{'\''}, -1)
 	if bytes.HasPrefix(b, []byte("[GIN-debug] ")) {
@@ -274,11 +283,20 @@ func (w GinLogger) Write(b []byte) (int, error) {
 	}
 	if bytes.HasPrefix(b, []byte("[WARNING] ")) {
 		b = b[10:]
-		dolog = w.Logger.Warn
 	}
 	lines := bytes.Split(b, []byte{'\n'})
 	for _, line := range lines {
-		dolog(string(line))
+		w.Logger.Debug(string(line))
 	}
 	return l, nil
+}
+
+var ginLogsFormatter = func(param gin.LogFormatterParams) string {
+	return fmt.Sprintf("[http]%d|%s|%s|%s|%s",
+		param.StatusCode,
+		param.ClientIP,
+		param.Method,
+		param.Path,
+		param.ErrorMessage,
+	)
 }
