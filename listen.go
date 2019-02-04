@@ -122,14 +122,20 @@ func Listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Forma
 				if len(line) == 0 {
 					continue
 				}
-				Metrics.Incoming.WithLabelValues("", "stdin").Inc()
 
 				e := NewEntry()
 				err = ParseAccessLogLine(f, string(line), e, l)
 				if err != nil {
 					l.Warn("Failed to parse access log", "error", err)
+					ReleaseEntry(e)
 					continue
 				}
+				if len(e.Fields) == 0 {
+					ReleaseEntry(e)
+					continue
+				}
+				e.Fields["stdin"] = trueValue
+				Metrics.Incoming.WithLabelValues("", "stdin").Inc()
 				cache = append(cache, e)
 				if len(cache) == 1024 {
 					flushCache(&cache, entries)
@@ -302,26 +308,28 @@ func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, en
 				if res.Message.Message() == nil {
 					return
 				}
-				Metrics.Incoming.WithLabelValues(conn.RemoteAddr().String(), "tcp").Inc()
 				msg := strings.TrimSpace(*res.Message.Message())
 				if msg == "" {
 					return
 				}
 				entry := NewEntry()
+				err := ParseAccessLogLine(f, msg, entry, l)
+				if err != nil {
+					ReleaseEntry(entry)
+					l.Info("Fail to parse TCP/RFC5424 message", "error", err)
+					return
+				}
+				if len(entry.Fields) == 0 {
+					ReleaseEntry(entry)
+					return
+				}
 				if res.Message.Hostname() != nil {
 					entry.SetString("syslog_hostname", *(res.Message.Hostname()))
 				}
 				if res.Message.Timestamp() != nil {
 					entry.SetString("syslog_timestamp", (*(res.Message.Timestamp())).Format(time.RFC3339))
 				}
-				err := ParseAccessLogLine(f, msg, entry, l)
-				if err != nil {
-					l.Info("Failed to parse TCP/RFC5424 message", "error", err)
-					return
-				}
-				if len(entry.Fields) == 0 {
-					return
-				}
+				Metrics.Incoming.WithLabelValues(conn.RemoteAddr().String(), "tcp").Inc()
 				cache = append(cache, entry)
 				if len(cache) == 1024 {
 					flushCache(&cache, entries)
@@ -359,8 +367,6 @@ func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, en
 			return err
 		}
 
-		Metrics.Incoming.WithLabelValues(conn.RemoteAddr().String(), "tcp").Inc()
-
 		fullLine = append(fullLine, line...)
 		entry, err := parseRFC3164(fullLine, f, l)
 		fullLine = fullLine[0:0]
@@ -371,12 +377,7 @@ func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, en
 			l.Info("Failed to parse access log entry from TCP/RFC3164", "error", err)
 			continue
 		}
-		if entry == nil {
-			continue
-		}
-		if len(entry.Fields) == 0 {
-			continue
-		}
+		Metrics.Incoming.WithLabelValues(conn.RemoteAddr().String(), "tcp").Inc()
 		cache = append(cache, entry)
 		if len(cache) == 1024 {
 			flushCache(&cache, entries)
@@ -404,16 +405,22 @@ func parseRFC5424(buf []byte, f Format, l Logger) (*Entry, error) {
 	}
 
 	entry := NewEntry()
+	err = ParseAccessLogLine(f, *m.Message(), entry, l)
+	if err != nil {
+		ReleaseEntry(entry)
+		return nil, err
+	}
+	if len(entry.Fields) == 0 {
+		ReleaseEntry(entry)
+		return nil, ErrEmptyMessage
+	}
 	if m.Hostname() != nil {
 		entry.SetString("syslog_hostname", *m.Hostname())
 	}
 	if m.Timestamp() != nil {
 		entry.SetString("syslog_timestamp", (*m.Timestamp()).Format(time.RFC3339))
 	}
-	err = ParseAccessLogLine(f, *m.Message(), entry, l)
-	if err != nil {
-		return nil, err
-	}
+
 	return entry, nil
 }
 
@@ -427,18 +434,21 @@ func parseRFC3164(buf []byte, f Format, l Logger) (*Entry, error) {
 	}
 
 	entry := NewEntry()
+	err = ParseAccessLogLine(f, m.Message, entry, l)
+	if err != nil {
+		ReleaseEntry(entry)
+		return nil, err
+	}
+	if len(entry.Fields) == 0 {
+		ReleaseEntry(entry)
+		return nil, ErrEmptyMessage
+	}
 	if m.HostName != "" {
 		entry.SetString("syslog_hostname", m.HostName)
 	}
 	if m.Time != nil {
 		entry.SetString("syslog_timestamp", m.Time.Format(time.RFC3339))
 	}
-
-	err = ParseAccessLogLine(f, m.Message, entry, l)
-	if err != nil {
-		return nil, err
-	}
-
 	return entry, nil
 }
 
@@ -473,12 +483,6 @@ func handleUDP(ctx context.Context, conn net.PacketConn, f Format, useRFC5424 bo
 				} else {
 					l.Info("Failed to parse UDP message", "error", pErr)
 				}
-				continue
-			}
-			if entry == nil {
-				continue
-			}
-			if len(entry.Fields) == 0 {
 				continue
 			}
 			entry.SetString("syslog_remote_addr", addr.String())
