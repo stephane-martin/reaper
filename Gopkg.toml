@@ -94,7 +94,9 @@
 	name = "github.com/valyala/fastjson"
 	version = "1.4.0"
 
-
+[[constraint]]
+	name = "golang.org/x/text"
+	branch = "master"
 
 [[override]]
 	name = "github.com/golang/snappy"

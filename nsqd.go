@@ -146,16 +146,16 @@ func NSQD(ctx context.Context, opts *nsqd.Options, filterOut []string, incoming 
 			Reconnect:
 
 				for {
-					logger.Info("Reconnecting handler")
+					logger.Info("Reconnecting to destination...")
 					to, cancel := context.WithTimeout(lctx, 30*time.Second)
 					err = reconnect(to)
 					cancel()
 					if err == nil {
-						logger.Info("Handler reconnected")
+						logger.Info("Destination succesfully reconnected")
 						break Reconnect
 					}
 					pause := bo.NextBackOff()
-					logger.Warn("Failed to reconnect handler", "error", err, "backoff", pause.String())
+					logger.Warn("Failed to reconnect to destination", "error", err, "backoff", pause.String())
 					select {
 					case <-lctx.Done():
 						return nil
@@ -205,6 +205,7 @@ func (h *handler) markError(err error) {
 }
 
 var ErrPullFinished = errors.New("pull finished")
+var millisec = float64(time.Millisecond)
 
 func (h *handler) HandleMessage(message *nsq.Message) error {
 	message.DisableAutoResponse()
@@ -254,16 +255,22 @@ func (h *handler) HandleMessage(message *nsq.Message) error {
 			return nil
 		}
 	}
-
-	err = h.th(h.ctx, entry, func(e error) {
+	start := time.Now()
+	callback := func(e error) {
 		ReleaseEntry(entry)
 		h.markError(e)
 		if e == nil {
 			message.Finish()
+			now := time.Now()
+			dLatency := float64(now.Sub(start).Nanoseconds()) / millisec
+			e2eLatency := float64(now.Sub(entry.Created).Nanoseconds()) / millisec
+			Metrics.DestinationLatency.Observe(dLatency)
+			Metrics.EndToEndLatency.Observe(e2eLatency)
 		} else {
 			message.Requeue(-1)
 		}
-	})
+	}
+	err = h.th(h.ctx, entry, callback)
 	h.markError(err)
 	if err == ErrNotConnected {
 		ReleaseEntry(entry)

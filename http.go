@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/text/encoding/htmlindex"
 )
 
 func validClientID(clientID string) bool {
@@ -46,7 +48,7 @@ type EntryACK struct {
 	ACK   func(error)
 }
 
-func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAddr string, filterOut []string, frmt Format, entries chan<- []*Entry, logger Logger) {
+func HTTPRoutes(ctx context.Context, g *errgroup.Group, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAddr string, filterOut []string, frmt Format, entries chan<- []*Entry, logger Logger) {
 
 	router.GET("/status", func(c *gin.Context) {
 		c.Status(200)
@@ -66,42 +68,95 @@ func HTTPRoutes(ctx context.Context, router *gin.Engine, nsqdTCPAddr, nsqdHTTPAd
 	))
 
 	router.POST("/upload", func(c *gin.Context) {
-
-	})
-
-	router.POST("/uploadfile", func(c *gin.Context) {
-		h, err := c.FormFile("file")
+		Metrics.IncomingConnections.WithLabelValues("http", c.ClientIP()).Inc()
+		ct := c.ContentType()
+		mt, params, err := mime.ParseMediaType(ct)
 		if err != nil {
-			_ = c.AbortWithError(400, err)
+			c.AbortWithError(400, fmt.Errorf("error parsing media type: %s", err))
 			return
 		}
-		f, err := h.Open()
+
+		charset := strings.TrimSpace(params["charset"])
+		logger.Debug("/upload", "mediatype", mt, "charset", charset)
+		if charset == "" {
+			charset = "utf-8"
+		}
+		encoding, err := htmlindex.Get(charset)
 		if err != nil {
-			_ = c.AbortWithError(500, err)
+			c.AbortWithError(500, fmt.Errorf("failed to get decoder for charset '%s': %s", charset, err))
 			return
 		}
-		defer f.Close()
-		s := bufio.NewScanner(f)
+		flusher := newFlush(entries)
+		rawLines := make(chan string)
+		defer close(rawLines)
 
-		all := make([]*Entry, 0)
-		for s.Scan() {
-			entry := NewEntry()
-			err := ParseAccessLogLine(frmt, strings.TrimSpace(s.Text()), entry, logger)
-			if err == nil {
-				if len(entry.Fields) > 0 {
-					entry.SetString("client_ip", c.ClientIP())
-					Metrics.Incoming.WithLabelValues(c.ClientIP(), "http").Inc()
-					all = append(all, entry)
-				} else {
-					ReleaseEntry(entry)
+		g.Go(func() error {
+			for line := range rawLines {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
 				}
-			} else {
-				ReleaseEntry(entry)
+				entry := NewEntry()
+				err := ParseAccessLogLine(frmt, line, entry, logger)
+				if err != nil {
+					ReleaseEntry(entry)
+					continue
+				}
+				if len(entry.Fields) == 0 {
+					ReleaseEntry(entry)
+					continue
+				}
+				entry.SetString("client_ip", c.ClientIP())
+				Metrics.IncomingMessages.WithLabelValues(c.ClientIP(), "http").Inc()
+				flusher.Add(entry)
 			}
+			flusher.Flush(true)
+			return nil
+		})
+
+		switch mt {
+		case "text/plain":
+			decoder := encoding.NewDecoder()
+			s := bufio.NewScanner(decoder.Reader(c.Request.Body))
+			for s.Scan() {
+				rawLines <- s.Text()
+			}
+		case "application/x-www-form-urlencoded":
+			decoder := encoding.NewDecoder()
+			var err error
+			for _, line := range c.PostFormArray("line") {
+				line, err = decoder.String(line)
+				if err == nil {
+					rawLines <- line
+				}
+			}
+		case "multipart/form-data":
+			decoder := encoding.NewDecoder()
+			var err error
+			for _, line := range c.PostFormArray("line") {
+				line, err = decoder.String(line)
+				if err == nil {
+					rawLines <- line
+				}
+			}
+			h, err := c.FormFile("file")
+			if err != nil {
+				return
+			}
+			f, err := h.Open()
+			if err != nil {
+				return
+			}
+			defer f.Close()
+			s := bufio.NewScanner(f)
+			for s.Scan() {
+				rawLines <- s.Text()
+			}
+		default:
+			c.AbortWithError(400, fmt.Errorf("mediatype not handled: %s", mt))
+			return
 		}
-		if len(all) > 0 {
-			entries <- all
-		}
+
 	})
 
 	router.DELETE("/download/:clientid", func(c *gin.Context) {

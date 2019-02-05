@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -47,18 +48,37 @@ func (r *timeoutReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func flushCache(cache *[]*Entry, c chan<- []*Entry) {
-	if len(*cache) > 0 {
-		copyCache := make([]*Entry, len(*cache))
-		copy(copyCache, *cache)
-		*cache = (*cache)[0:0]
-		c <- copyCache
+type flush struct {
+	last  time.Time
+	cache []*Entry
+	ch    chan<- []*Entry
+}
+
+func newFlush(ch chan<- []*Entry) *flush {
+	return &flush{cache: make([]*Entry, 0, 1024), ch: ch, last: time.Now()}
+}
+
+func (f *flush) Flush(force bool) {
+	now := time.Now()
+	if len(f.cache) == 0 {
+		f.last = now
+		return
+	}
+	if force || len(f.cache) >= 1024 || now.Sub(f.last) >= time.Second {
+		copyCache := make([]*Entry, len(f.cache))
+		copy(copyCache, f.cache)
+		f.cache = f.cache[0:0]
+		f.ch <- copyCache
+		f.last = now
 	}
 }
 
-func Listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Format, useRFC5424 bool, entries chan<- []*Entry, l Logger) error {
-	defer close(entries)
+func (f *flush) Add(entry *Entry) {
+	f.cache = append(f.cache, entry)
+	f.Flush(false)
+}
 
+func Listen(ctx context.Context, tcp []string, udp []string, fifos []string, stdin bool, f Format, useRFC5424 bool, entries chan<- []*Entry, l Logger) error {
 	g, lctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		return listenTCP(lctx, tcp, f, useRFC5424, entries, l)
@@ -66,84 +86,186 @@ func Listen(ctx context.Context, tcp []string, udp []string, stdin bool, f Forma
 	g.Go(func() error {
 		return listenUDP(lctx, udp, f, useRFC5424, entries, l)
 	})
+	g.Go(func() error {
+		return listenFIFO(lctx, fifos, f, entries, l)
+	})
 
 	if stdin {
-		infos, err := os.Stdin.Stat()
-		if err != nil {
-			return err
-		}
-		mode := infos.Mode()
-		if mode&os.ModeCharDevice != 0 && infos.Size() != 0 {
-			l.Warn("--stdin does not work for such input")
-			return g.Wait()
-		}
-		if mode.IsRegular() {
-			l.Warn("--stdin does not work for such input")
-			return g.Wait()
-		}
-
-		err = syscall.SetNonblock(0, true)
-		if err != nil {
-			l.Warn("stdin can not be set to non-blocking", "error", err)
-			return g.Wait()
-		}
-		stdin := os.NewFile(0, "stdin")
 		g.Go(func() error {
-			<-lctx.Done()
-			_ = os.Stdin.Close()
-			return nil
+			return listenStdin(lctx, f, entries, l)
 		})
+	}
+	return g.Wait()
+}
 
+func listenFIFO(ctx context.Context, fifos []string, f Format, entries chan<- []*Entry, l Logger) error {
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = ""
+	}
+
+	handles := make([]*os.File, 0, len(fifos))
+	for _, fifo := range fifos {
+		err := syscall.Mkfifo(fifo, 0666)
+		if err != nil && !os.IsExist(err) {
+			return fmt.Errorf("impossible to create FIFO: %s", err)
+		}
+		fifoh, err := os.OpenFile(fifo, os.O_RDONLY|syscall.O_NONBLOCK, 0600)
+		if err != nil {
+			return fmt.Errorf("impossible to open FIFO '%s': %s", fifo, err)
+		}
+		defer fifoh.Close()
+		infos, err := fifoh.Stat()
+		if err != nil {
+			return fmt.Errorf("impossible to stat() FIFO '%s': %s", fifo, err)
+		}
+		if infos.Mode()&os.ModeNamedPipe == 0 {
+			return fmt.Errorf("not a FIFO: %s", fifo)
+		}
+		handles = append(handles, fifoh)
+	}
+
+	g, lctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		<-lctx.Done()
+		for _, h := range handles {
+			_ = h.Close()
+		}
+		return nil
+	})
+
+	flusher := newFlush(entries)
+
+	for _, h := range handles {
+		handle := h
+		reader := bufio.NewReader(&timeoutReader{
+			reader: handle,
+			callback: func() {
+				flusher.Flush(true)
+			},
+			setDeadline: func() {
+				h.SetReadDeadline(time.Now().Add(time.Second))
+			},
+		})
 		g.Go(func() error {
-			cache := make([]*Entry, 0, 1024)
-			defer flushCache(&cache, entries)
-
-			reader := bufio.NewReader(&timeoutReader{
-				reader: stdin,
-				callback: func() {
-					flushCache(&cache, entries)
-				},
-				setDeadline: func() {
-					stdin.SetReadDeadline(time.Now().Add(time.Second))
-				},
-			})
-
-			var readError error
-			var line []byte
-
 			for {
-				if readError != nil {
-					l.Info("Error scanning stdin", "error", readError)
+				buf, err := reader.ReadBytes('\n')
+				if len(buf) > 0 {
+					e := NewEntry()
+					err = ParseAccessLogLine(f, string(buf), e, l)
+					if err != nil {
+						l.Warn("Failed to parse access log", "error", err)
+						ReleaseEntry(e)
+					} else if len(e.Fields) == 0 {
+						ReleaseEntry(e)
+					} else {
+						e.SetString("fifo", handle.Name())
+						if hostname != "" {
+							e.SetString("local_hostname", hostname)
+						}
+						Metrics.IncomingMessages.WithLabelValues("", "stdin").Inc()
+						flusher.Add(e)
+					}
+				}
+				if err == io.EOF {
+					select {
+					case <-lctx.Done():
+						return nil
+					case <-time.After(time.Second):
+					}
+				} else if err != nil {
+					l.Info("Read from fido ended", "fifo", handle.Name(), "error", err)
 					return nil
-				}
-				line, readError = reader.ReadBytes('\n')
-
-				line = bytes.TrimSpace(line)
-				if len(line) == 0 {
-					continue
-				}
-
-				e := NewEntry()
-				err = ParseAccessLogLine(f, string(line), e, l)
-				if err != nil {
-					l.Warn("Failed to parse access log", "error", err)
-					ReleaseEntry(e)
-					continue
-				}
-				if len(e.Fields) == 0 {
-					ReleaseEntry(e)
-					continue
-				}
-				e.Fields["stdin"] = trueValue
-				Metrics.Incoming.WithLabelValues("", "stdin").Inc()
-				cache = append(cache, e)
-				if len(cache) == 1024 {
-					flushCache(&cache, entries)
 				}
 			}
 		})
-
 	}
+	return g.Wait()
+}
+
+func listenStdin(ctx context.Context, f Format, entries chan<- []*Entry, l Logger) error {
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = ""
+	}
+
+	infos, err := os.Stdin.Stat()
+	if err != nil {
+		return fmt.Errorf("impossible to stat() stdin: %s", err)
+	}
+	mode := infos.Mode()
+	if mode&os.ModeCharDevice != 0 && infos.Size() != 0 {
+		return errors.New("--stdin does not work for such input")
+	}
+	if mode.IsRegular() {
+		return errors.New("--stdin does not work for such input")
+	}
+
+	err = syscall.SetNonblock(0, true)
+	if err != nil {
+		return fmt.Errorf("stdin can not be set to non-blocking: %s", "error")
+	}
+
+	stdin := os.NewFile(0, "stdin")
+	g, lctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		<-lctx.Done()
+		_ = os.Stdin.Close()
+		return nil
+	})
+
+	g.Go(func() error {
+		flusher := newFlush(entries)
+		defer flusher.Flush(true)
+
+		reader := bufio.NewReader(&timeoutReader{
+			reader: stdin,
+			callback: func() {
+				flusher.Flush(true)
+			},
+			setDeadline: func() {
+				stdin.SetReadDeadline(time.Now().Add(time.Second))
+			},
+		})
+
+		var readError error
+		var line []byte
+
+		for {
+			if readError != nil {
+				if readError != io.EOF {
+					l.Info("Error scanning stdin", "error", readError)
+				}
+				return nil
+			}
+			line, readError = reader.ReadBytes('\n')
+
+			line = bytes.TrimSpace(line)
+			if len(line) == 0 {
+				continue
+			}
+
+			e := NewEntry()
+			err = ParseAccessLogLine(f, string(line), e, l)
+			if err != nil {
+				l.Warn("Failed to parse access log", "error", err)
+				ReleaseEntry(e)
+				continue
+			}
+			if len(e.Fields) == 0 {
+				ReleaseEntry(e)
+				continue
+			}
+			e.Fields["stdin"] = trueValue
+			if hostname != "" {
+				e.SetString("local_hostname", hostname)
+			}
+			Metrics.IncomingMessages.WithLabelValues("", "stdin").Inc()
+			flusher.Add(e)
+		}
+	})
 	return g.Wait()
 }
 
@@ -264,7 +386,7 @@ func listenTCP(ctx context.Context, tcp []string, f Format, useRFC5424 bool, ent
 						l.Warn("SetReadBuffer failed on Unix socket", "error", err)
 					}
 				}
-				Metrics.SyslogConnections.WithLabelValues(conn.RemoteAddr().String()).Inc()
+				Metrics.IncomingConnections.WithLabelValues("tcp", conn.RemoteAddr().String()).Inc()
 				g.Go(func() error {
 					<-lctx.Done()
 					_ = conn.Close()
@@ -293,8 +415,8 @@ func listenTCP(ctx context.Context, tcp []string, f Format, useRFC5424 bool, ent
 }
 
 func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, entries chan<- []*Entry, l Logger) error {
-	cache := make([]*Entry, 0, 1024)
-	defer flushCache(&cache, entries)
+	flusher := newFlush(entries)
+	defer flusher.Flush(true)
 
 	if useRFC5424 {
 		p := nontransparent.NewParser(
@@ -329,17 +451,14 @@ func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, en
 				if res.Message.Timestamp() != nil {
 					entry.SetString("syslog_timestamp", (*(res.Message.Timestamp())).Format(time.RFC3339))
 				}
-				Metrics.Incoming.WithLabelValues(conn.RemoteAddr().String(), "tcp").Inc()
-				cache = append(cache, entry)
-				if len(cache) == 1024 {
-					flushCache(&cache, entries)
-				}
+				Metrics.IncomingMessages.WithLabelValues(conn.RemoteAddr().String(), "tcp").Inc()
+				flusher.Add(entry)
 			}),
 		)
 		p.Parse(&timeoutReader{
 			reader: conn,
 			callback: func() {
-				flushCache(&cache, entries)
+				flusher.Flush(true)
 			},
 			setDeadline: func() {
 				conn.SetReadDeadline(time.Now().Add(time.Second))
@@ -361,7 +480,7 @@ func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, en
 		if err != nil {
 			if isTimeout(err) {
 				fullLine = append(fullLine, line...)
-				flushCache(&cache, entries)
+				flusher.Flush(true)
 				continue
 			}
 			return err
@@ -377,11 +496,8 @@ func handleTCP(ctx context.Context, conn net.Conn, f Format, useRFC5424 bool, en
 			l.Info("Failed to parse access log entry from TCP/RFC3164", "error", err)
 			continue
 		}
-		Metrics.Incoming.WithLabelValues(conn.RemoteAddr().String(), "tcp").Inc()
-		cache = append(cache, entry)
-		if len(cache) == 1024 {
-			flushCache(&cache, entries)
-		}
+		Metrics.IncomingMessages.WithLabelValues(conn.RemoteAddr().String(), "tcp").Inc()
+		flusher.Add(entry)
 	}
 }
 
@@ -453,8 +569,8 @@ func parseRFC3164(buf []byte, f Format, l Logger) (*Entry, error) {
 }
 
 func handleUDP(ctx context.Context, conn net.PacketConn, f Format, useRFC5424 bool, entries chan<- []*Entry, l Logger) error {
-	cache := make([]*Entry, 0, 1024)
-	defer flushCache(&cache, entries)
+	flusher := newFlush(entries)
+	defer flusher.Flush(true)
 
 	buf := make([]byte, 65536)
 	var (
@@ -475,7 +591,6 @@ func handleUDP(ctx context.Context, conn net.PacketConn, f Format, useRFC5424 bo
 		_ = conn.SetReadDeadline(time.Now().Add(time.Second))
 		n, addr, err = conn.ReadFrom(buf)
 		if n > 0 {
-			Metrics.Incoming.WithLabelValues(addr.String(), "udp").Inc()
 			entry, pErr = parse(buf[:n], f, l)
 			if pErr != nil {
 				if _, ok := pErr.(ErrProtocolSyslog); ok {
@@ -486,15 +601,12 @@ func handleUDP(ctx context.Context, conn net.PacketConn, f Format, useRFC5424 bo
 				continue
 			}
 			entry.SetString("syslog_remote_addr", addr.String())
-
-			cache = append(cache, entry)
-			if len(cache) == 1024 {
-				flushCache(&cache, entries)
-			}
+			Metrics.IncomingMessages.WithLabelValues(addr.String(), "udp").Inc()
+			flusher.Add(entry)
 		}
 		if err != nil {
 			if isTimeout(err) {
-				flushCache(&cache, entries)
+				flusher.Flush(true)
 			} else {
 				return err
 			}

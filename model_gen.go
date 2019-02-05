@@ -66,6 +66,12 @@ func (z *Entry) DecodeMsg(dc *msgp.Reader) (err error) {
 				}
 				z.Fields[za0001] = za0002
 			}
+		case "created":
+			z.Created, err = dc.ReadTime()
+			if err != nil {
+				err = msgp.WrapError(err, "Created")
+				return
+			}
 		default:
 			err = dc.Skip()
 			if err != nil {
@@ -79,9 +85,9 @@ func (z *Entry) DecodeMsg(dc *msgp.Reader) (err error) {
 
 // EncodeMsg implements msgp.Encodable
 func (z *Entry) EncodeMsg(en *msgp.Writer) (err error) {
-	// map header, size 3
+	// map header, size 4
 	// write "uid"
-	err = en.Append(0x83, 0xa3, 0x75, 0x69, 0x64)
+	err = en.Append(0x84, 0xa3, 0x75, 0x69, 0x64)
 	if err != nil {
 		return
 	}
@@ -122,15 +128,25 @@ func (z *Entry) EncodeMsg(en *msgp.Writer) (err error) {
 			return
 		}
 	}
+	// write "created"
+	err = en.Append(0xa7, 0x63, 0x72, 0x65, 0x61, 0x74, 0x65, 0x64)
+	if err != nil {
+		return
+	}
+	err = en.WriteTime(z.Created)
+	if err != nil {
+		err = msgp.WrapError(err, "Created")
+		return
+	}
 	return
 }
 
 // MarshalMsg implements msgp.Marshaler
 func (z *Entry) MarshalMsg(b []byte) (o []byte, err error) {
 	o = msgp.Require(b, z.Msgsize())
-	// map header, size 3
+	// map header, size 4
 	// string "uid"
-	o = append(o, 0x83, 0xa3, 0x75, 0x69, 0x64)
+	o = append(o, 0x84, 0xa3, 0x75, 0x69, 0x64)
 	o = msgp.AppendString(o, z.UID)
 	// string "host"
 	o = append(o, 0xa4, 0x68, 0x6f, 0x73, 0x74)
@@ -146,6 +162,9 @@ func (z *Entry) MarshalMsg(b []byte) (o []byte, err error) {
 			return
 		}
 	}
+	// string "created"
+	o = append(o, 0xa7, 0x63, 0x72, 0x65, 0x61, 0x74, 0x65, 0x64)
+	o = msgp.AppendTime(o, z.Created)
 	return
 }
 
@@ -209,6 +228,12 @@ func (z *Entry) UnmarshalMsg(bts []byte) (o []byte, err error) {
 				}
 				z.Fields[za0001] = za0002
 			}
+		case "created":
+			z.Created, bts, err = msgp.ReadTimeBytes(bts)
+			if err != nil {
+				err = msgp.WrapError(err, "Created")
+				return
+			}
 		default:
 			bts, err = msgp.Skip(bts)
 			if err != nil {
@@ -230,6 +255,7 @@ func (z *Entry) Msgsize() (s int) {
 			s += msgp.StringPrefixSize + len(za0001) + za0002.Msgsize()
 		}
 	}
+	s += 8 + msgp.TimeSize
 	return
 }
 

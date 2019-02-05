@@ -6,9 +6,11 @@ import (
 )
 
 type metrics struct {
-	SyslogConnections *prometheus.CounterVec
-	Incoming          *prometheus.CounterVec
-	Registry          *prometheus.Registry
+	IncomingConnections *prometheus.CounterVec
+	IncomingMessages    *prometheus.CounterVec
+	DestinationLatency  prometheus.Summary
+	EndToEndLatency     prometheus.Summary
+	Registry            *prometheus.Registry
 }
 
 var Metrics = newMetrics()
@@ -16,15 +18,15 @@ var Metrics = newMetrics()
 func newMetrics() *metrics {
 	m := new(metrics)
 
-	m.SyslogConnections = prometheus.NewCounterVec(
+	m.IncomingConnections = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "syslog_connections_total",
-			Help: "Number of syslog TCP connections",
+			Name: "incoming_connections_total",
+			Help: "Number of incoming connections",
 		},
-		[]string{"client_addr"},
+		[]string{"client_addr", "connection_type"},
 	)
 
-	m.Incoming = prometheus.NewCounterVec(
+	m.IncomingMessages = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "incoming_messages_total",
 			Help: "Number of received messages",
@@ -32,10 +34,30 @@ func newMetrics() *metrics {
 		[]string{"client_addr", "connection_type"},
 	)
 
+	m.DestinationLatency = prometheus.NewSummary(prometheus.SummaryOpts{
+		Help:       "observe the duration in milliseconds of the delivery of messages (counting from the instant the message was out of nsqd)",
+		MaxAge:     prometheus.DefMaxAge,
+		BufCap:     prometheus.DefBufCap,
+		AgeBuckets: prometheus.DefAgeBuckets,
+		Objectives: map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001, 0.999: 0.0001},
+		Name:       "destination_latency",
+	})
+
+	m.EndToEndLatency = prometheus.NewSummary(prometheus.SummaryOpts{
+		Help:       "observe the duration in milliseconds of the delivery of messages (counting from the creation instant of the message)",
+		MaxAge:     prometheus.DefMaxAge,
+		BufCap:     prometheus.DefBufCap,
+		AgeBuckets: prometheus.DefAgeBuckets,
+		Objectives: map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001, 0.999: 0.0001},
+		Name:       "end_to_end_latency",
+	})
+
 	m.Registry = prometheus.NewRegistry()
 	m.Registry.MustRegister(
-		m.SyslogConnections,
-		m.Incoming,
+		m.IncomingConnections,
+		m.IncomingMessages,
+		m.DestinationLatency,
+		m.EndToEndLatency,
 		prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
 		prometheus.NewGoCollector(),
 	)
@@ -43,18 +65,18 @@ func newMetrics() *metrics {
 }
 
 type nsqdCollector struct {
-	depth *prometheus.Desc
+	depth        *prometheus.Desc
 	backendDepth *prometheus.Desc
 	messageCount *prometheus.Desc
 
-	channelDepth *prometheus.Desc
+	channelDepth        *prometheus.Desc
 	channelBackendDepth *prometheus.Desc
-	channelInFlight *prometheus.Desc
-	channelDeferred *prometheus.Desc
-	channelMessage *prometheus.Desc
-	channelRequeue *prometheus.Desc
-	channelTimeout *prometheus.Desc
-	channelNbClients *prometheus.Desc
+	channelInFlight     *prometheus.Desc
+	channelDeferred     *prometheus.Desc
+	channelMessage      *prometheus.Desc
+	channelRequeue      *prometheus.Desc
+	channelTimeout      *prometheus.Desc
+	channelNbClients    *prometheus.Desc
 
 	daemon *nsqd.NSQD
 }

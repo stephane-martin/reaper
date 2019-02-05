@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dop251/goja"
 	fflib "github.com/pquerna/ffjson/fflib/v1"
@@ -16,15 +17,15 @@ var serPool = &sync.Pool{
 	},
 }
 
-var t bool = true
-var f bool = false
+var trr bool = true
+var faa bool = false
 
 var trueValue = Value{
-	B: &t,
+	B: &trr,
 }
 
 var falseValue = Value{
-	B: &f,
+	B: &faa,
 }
 
 func getBuffer() []byte {
@@ -47,6 +48,7 @@ func NewEntry() *Entry {
 	entry.UID = NewULID().String()
 	entry.Fields["uid"] = Value{S: []byte(entry.UID)}
 	entry.Host = ""
+	entry.Created = time.Now()
 	entry.serialized = nil
 
 	return entry

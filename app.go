@@ -84,6 +84,9 @@ func BuildApp() *cli.App {
 	app.Version = Version
 	app.Usage = "access logs to queues"
 	app.Description = "reaper receives access logs from a web server and pushes the logs to an external message queue"
+	// TODO: static tags
+	// TODO: embed in go app
+	// TODO: how to log from PHP/Go/Node ?
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:   "loglevel, log-level, level",
@@ -111,6 +114,11 @@ func BuildApp() *cli.App {
 			Name:   "udp",
 			Usage:  "listen to syslog/UDP on that address (eg. 127.0.0.1:1514, can be specified multiple times)",
 			EnvVar: "REAPER_UDP_ADDRESS",
+		},
+		cli.StringSliceFlag{
+			Name:   "fifo",
+			Usage:  "read access logs from the specified FIFOs",
+			EnvVar: "REAPER_FIFO",
 		},
 		cli.BoolFlag{
 			Name:   "rfc5424, newsyslog",
@@ -184,10 +192,7 @@ func BuildApp() *cli.App {
 
 	app.Action = func(c *cli.Context) error {
 		logger := NewLogger(c)
-		ctx, cancel := context.WithCancel(context.Background())
-		listenSignals(cancel)
-		g, lctx := errgroup.WithContext(ctx)
-		return action(lctx, g, c, nil, nil, logger)
+		return action(c, nil, nil, logger)
 	}
 
 	app.Commands = []cli.Command{
@@ -196,6 +201,13 @@ func BuildApp() *cli.App {
 			Usage: "write access logs to stdout",
 			Action: func(c *cli.Context) error {
 				return actionWriter(c, os.Stdout, false, 0)
+			},
+		},
+		{
+			Name:  "null",
+			Usage: "drop access logs (for tests...)",
+			Action: func(c *cli.Context) error {
+				return actionWriter(c, nil, false, 0)
 			},
 		},
 		{
@@ -326,9 +338,6 @@ func BuildApp() *cli.App {
 			},
 			Action: func(c *cli.Context) error {
 				logger := NewLogger(c)
-				ctx, cancel := context.WithCancel(context.Background())
-				listenSignals(cancel)
-				g, lctx := errgroup.WithContext(ctx)
 
 				login := c.String("login")
 				passcode := c.String("passcode")
@@ -377,7 +386,7 @@ func BuildApp() *cli.App {
 					connRef.Store(c3)
 					return nil
 				}
-				return action(lctx, g, c, h, reconnect, logger)
+				return action(c, h, reconnect, logger)
 			},
 		},
 		{
@@ -405,9 +414,6 @@ func BuildApp() *cli.App {
 			},
 			Action: func(c *cli.Context) error {
 				logger := NewLogger(c)
-				ctx, cancel := context.WithCancel(context.Background())
-				listenSignals(cancel)
-				g, lctx := errgroup.WithContext(ctx)
 
 				connURI := c.String("uri")
 				table := pq.QuoteIdentifier(c.String("table"))
@@ -473,26 +479,24 @@ func BuildApp() *cli.App {
 						return err
 					}
 
-					g.Go(func() error {
+					go func() {
 						deadline := time.Now().Add(time.Second)
 						entries := make([]PGEntries, 0, 0)
 						chEntries := ch
 
 					L:
 						for {
+							if chEntries == nil {
+								return
+							}
 							select {
-							case <-lctx.Done():
-								for _, e := range entries {
-									e.ACK(lctx.Err())
-								}
-								return nil
 							case <-time.After(5 * time.Second):
 								err := db.Ping()
 								if err != nil {
 									for _, e := range entries {
 										e.ACK(err)
 									}
-									return nil
+									return
 								}
 							case e, ok := <-chEntries:
 								if !ok {
@@ -505,23 +509,23 @@ func BuildApp() *cli.App {
 										deadline = time.Now().Add(time.Second)
 										continue L
 									}
-									tx, err := db.BeginTx(lctx, &sql.TxOptions{ReadOnly: false, Isolation: sql.LevelReadCommitted})
+									tx, err := db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: false, Isolation: sql.LevelReadCommitted})
 									if err != nil {
 										for _, e := range entries {
 											e.ACK(err)
 										}
-										return nil
+										return
 									}
 
 									for _, e := range entries {
 										query, fields := makeQuery(e.Fields)
-										_, err := tx.ExecContext(lctx, query, fields...)
+										_, err := tx.Exec(query, fields...)
 										if err != nil {
 											_ = tx.Rollback()
 											for _, e := range entries {
 												e.ACK(err)
 											}
-											return nil
+											return
 										}
 									}
 
@@ -530,7 +534,7 @@ func BuildApp() *cli.App {
 										for _, e := range entries {
 											e.ACK(err)
 										}
-										return nil
+										return
 									}
 									for _, e := range entries {
 										e.ACK(nil)
@@ -542,7 +546,7 @@ func BuildApp() *cli.App {
 							}
 						}
 
-					})
+					}()
 
 					dbRef.Store(db)
 					return nil
@@ -560,7 +564,9 @@ func BuildApp() *cli.App {
 					}
 				}
 
-				return action(lctx, g, c, h, reconnect, logger)
+				defer closeDB()
+
+				return action(c, h, reconnect, logger)
 
 			},
 		},
@@ -594,9 +600,6 @@ func BuildApp() *cli.App {
 			},
 			Action: func(c *cli.Context) error {
 				logger := NewLogger(c)
-				ctx, cancel := context.WithCancel(context.Background())
-				listenSignals(cancel)
-				g, lctx := errgroup.WithContext(ctx)
 
 				uri := c.String("uri")
 				exchangeName := c.String("exchange")
@@ -743,7 +746,7 @@ func BuildApp() *cli.App {
 					)
 				}
 
-				return action(lctx, g, c, h, reconnect, logger)
+				return action(c, h, reconnect, logger)
 
 			},
 		},
@@ -765,9 +768,6 @@ func BuildApp() *cli.App {
 			},
 			Action: func(c *cli.Context) error {
 				logger := NewLogger(c)
-				ctx, cancel := context.WithCancel(context.Background())
-				listenSignals(cancel)
-				g, lctx := errgroup.WithContext(ctx)
 
 				urls := c.StringSlice("url")
 				if len(urls) == 0 {
@@ -901,7 +901,7 @@ func BuildApp() *cli.App {
 					return nil
 				}
 
-				return action(lctx, g, c, h, reconnect, logger)
+				return action(c, h, reconnect, logger)
 			},
 		},
 		{
@@ -967,9 +967,6 @@ func BuildApp() *cli.App {
 			},
 			Action: func(c *cli.Context) error {
 				logger := NewLogger(c)
-				ctx, cancel := context.WithCancel(context.Background())
-				listenSignals(cancel)
-				g, lctx := errgroup.WithContext(ctx)
 				redisAddress := c.String("addr")
 				listName := c.String("listname")
 				password := c.String("password")
@@ -994,7 +991,7 @@ func BuildApp() *cli.App {
 					return err
 				}
 
-				return action(lctx, g, c, h, cancelReconnect(reconnect), logger)
+				return action(c, h, cancelReconnect(reconnect), logger)
 			},
 		},
 		{
@@ -1016,10 +1013,6 @@ func BuildApp() *cli.App {
 			Action: func(c *cli.Context) error {
 				logger := NewLogger(c)
 				sarama.Logger = AdaptLoggerSarama(logger)
-
-				ctx, cancel := context.WithCancel(context.Background())
-				listenSignals(cancel)
-				g, lctx := errgroup.WithContext(ctx)
 
 				config := sarama.NewConfig()
 				config.Net.KeepAlive = 30 * time.Second
@@ -1113,7 +1106,7 @@ func BuildApp() *cli.App {
 					}
 				}
 
-				return action(lctx, g, c, h, cancelReconnect(reconnect), logger)
+				return action(c, h, cancelReconnect(reconnect), logger)
 			},
 		},
 		{
@@ -1140,10 +1133,6 @@ func BuildApp() *cli.App {
 			},
 			Action: func(c *cli.Context) error {
 				logger := NewLogger(c)
-				ctx, cancel := context.WithCancel(context.Background())
-				listenSignals(cancel)
-
-				g, lctx := errgroup.WithContext(ctx)
 
 				tcpAddress := c.String("addr")
 				topic := c.String("topic")
@@ -1190,7 +1179,7 @@ func BuildApp() *cli.App {
 				reconnect := func(_ context.Context) error {
 					return p.Ping()
 				}
-				return action(lctx, g, c, h, cancelReconnect(reconnect), logger)
+				return action(c, h, cancelReconnect(reconnect), logger)
 			},
 		},
 	}
@@ -1198,12 +1187,17 @@ func BuildApp() *cli.App {
 	return app
 }
 
-func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, reconnect func(context.Context) error, logger Logger) (err error) {
+func action(c *cli.Context, h Handler, reconnect func(context.Context) error, logger Logger) (err error) {
 	defer func() {
 		if err != nil {
 			err = cli.NewExitError(err.Error(), 1)
 		}
 	}()
+
+	gctx, cancel := context.WithCancel(context.Background())
+	listenSignals(cancel)
+	g, ctx := errgroup.WithContext(gctx)
+	nsqG, nsqCtx := errgroup.WithContext(gctx)
 
 	pidFile := c.GlobalString("pidfile")
 	if pidFile != "" {
@@ -1227,6 +1221,7 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	incoming := make(chan []*Entry, 1024)
 	tcpAddrs := c.GlobalStringSlice("tcp")
 	udpAddrs := c.GlobalStringSlice("udp")
+	fifos := c.GlobalStringSlice("fifo")
 	stdin := c.GlobalBool("stdin")
 	useRFC5424 := c.GlobalBool("rfc5424")
 	websocketAddr := c.GlobalString("websocket-address")
@@ -1249,7 +1244,7 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	if httpAddr != "" {
 		httpRoutes = gin.New()
 		httpRoutes.Use(loggingMiddleware, gin.Recovery())
-		HTTPRoutes(ctx, httpRoutes, nsqdOpts.TCPAddress, nsqdOpts.HTTPAddress, filterOut, format, incoming, logger)
+		HTTPRoutes(ctx, g, httpRoutes, nsqdOpts.TCPAddress, nsqdOpts.HTTPAddress, filterOut, format, incoming, logger)
 	}
 
 	if websocketAddr != "" {
@@ -1275,12 +1270,14 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 		}
 	}
 
-	g.Go(func() error {
-		return NSQD(ctx, nsqdOpts, filterOut, incoming, h, reconnect, maxInFlight, logger)
+	nsqG.Go(func() error {
+		err := NSQD(nsqCtx, nsqdOpts, filterOut, incoming, h, reconnect, maxInFlight, logger)
+		cancel()
+		return err
 	})
 
 	g.Go(func() error {
-		return Listen(ctx, tcpAddrs, udpAddrs, stdin, format, useRFC5424, incoming, logger)
+		return Listen(ctx, tcpAddrs, udpAddrs, fifos, stdin, format, useRFC5424, incoming, logger)
 	})
 
 	if httpListener != nil {
@@ -1310,6 +1307,15 @@ func action(ctx context.Context, g *errgroup.Group, c *cli.Context, h Handler, r
 	}
 
 	err = g.Wait()
+
+	close(incoming)
+	cancel()
+
+	nsqErr := nsqG.Wait()
+
+	if nsqErr != nil && nsqErr != context.Canceled {
+		return nsqErr
+	}
 	if err != nil && err != context.Canceled {
 		return err
 	}
@@ -1323,12 +1329,16 @@ func actionWriter(c *cli.Context, w io.Writer, gzipEnabled bool, gzipLevel int) 
 	g, lctx := errgroup.WithContext(ctx)
 	var l sync.Mutex
 
-	bufw := bufio.NewWriter(w)
+	var bufw *bufio.Writer
+	if w != nil {
+		// todo: review the writer buffer size
+		bufw = bufio.NewWriter(w)
+		defer bufw.Flush()
+	}
 	//noinspection GoUnhandledErrorResult
-	defer bufw.Flush()
 	var writer io.Writer
 
-	if gzipEnabled {
+	if gzipEnabled && w != nil {
 		gzipw, err := gzip.NewWriterLevel(bufw, gzipLevel)
 		if err != nil {
 			return err
@@ -1347,11 +1357,13 @@ func actionWriter(c *cli.Context, w io.Writer, gzipEnabled bool, gzipLevel int) 
 	g.Go(func() error {
 		for {
 			if deadline.Load().(time.Time).Before(time.Now()) {
-				l.Lock()
-				err := bufw.Flush()
-				l.Unlock()
-				if err != nil {
-					return err
+				if w != nil {
+					l.Lock()
+					err := bufw.Flush()
+					l.Unlock()
+					if err != nil {
+						return err
+					}
 				}
 			}
 			select {
@@ -1363,21 +1375,26 @@ func actionWriter(c *cli.Context, w io.Writer, gzipEnabled bool, gzipLevel int) 
 	})
 
 	h := func(hctx context.Context, entry *Entry, ack func(error)) error {
+		var err error
+
 		deadline.Store(time.Now().Add(time.Second))
 
-		l.Lock()
-		_, err := io.WriteString(writer, string(entry.serialized))
-		if err == nil {
-			_, err = writer.Write(newLine)
+		if w != nil {
+			l.Lock()
+			_, err = io.WriteString(writer, string(entry.serialized))
+			if err == nil {
+				_, err = writer.Write(newLine)
+			}
+			l.Unlock()
 		}
-		l.Unlock()
+
 		if err == nil {
 			ack(nil)
 			return nil
 		}
 		return err
 	}
-	return action(lctx, g, c, h, nil, logger)
+	return action(c, h, nil, logger)
 }
 
 func cancelReconnect(reconnect func(context.Context) error) func(context.Context) error {
