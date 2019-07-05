@@ -65,15 +65,8 @@ func ReleaseEntry(e *Entry) {
 
 func ToFields(e *Entry, fields []string) []interface{} {
 	res := make([]interface{}, 0, len(fields))
-	var (
-		f string
-		i interface{}
-	)
-	for _, f = range fields {
-		i = e.Fields[f].V()
-		if i != nil {
-			res = append(res, e.Fields[f])
-		}
+	for _, f := range fields {
+		res = append(res, e.Fields[f].V())
 	}
 	return res
 }

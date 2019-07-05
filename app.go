@@ -422,7 +422,7 @@ func BuildApp() *cli.App {
 				for _, f := range strings.Split(c.String("fields"), ",") {
 					f = strings.TrimSpace(f)
 					if f != "" {
-						fieldNames = append(fieldNames, pq.QuoteIdentifier(f))
+						fieldNames = append(fieldNames, f)
 					}
 				}
 
@@ -431,7 +431,7 @@ func BuildApp() *cli.App {
 					selectedFields := make([]interface{}, 0, len(fields))
 					for i := range fieldNames {
 						if fields[i] != nil {
-							selectFieldNames = append(selectFieldNames, fieldNames[i])
+							selectFieldNames = append(selectFieldNames, pq.QuoteIdentifier(fieldNames[i]))
 							selectedFields = append(selectedFields, fields[i])
 						}
 					}
