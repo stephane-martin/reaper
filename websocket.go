@@ -4,11 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
-	assetfs "github.com/elazarl/go-bindata-assetfs"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"golang.org/x/sync/errgroup"
@@ -26,21 +23,13 @@ func init() {
 	gin.DisableConsoleColor()
 }
 
+var staticServer = http.FileServer(AssetFile())
+
 func staticRessources(router *gin.Engine, paths []string, subDirectory string) {
 	for _, p := range paths {
 		path := p
 		router.GET(path, func(c *gin.Context) {
-			http.FileServer(&assetfs.AssetFS{
-				Asset: func(path string) ([]byte, error) {
-					return Asset(filepath.Join(subDirectory, path))
-				},
-				AssetInfo: func(path string) (os.FileInfo, error) {
-					return AssetInfo(filepath.Join(subDirectory, path))
-				},
-				AssetDir: func(path string) ([]string, error) {
-					return AssetDir(filepath.Join(subDirectory, path))
-				},
-			}).ServeHTTP(c.Writer, c.Request)
+			staticServer.ServeHTTP(c.Writer, c.Request)
 		})
 	}
 }
