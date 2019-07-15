@@ -1,6 +1,5 @@
 .SUFFIXES:
-.PHONY: debug release clean version revive dockerbuild docker push all tag upload
-.SILENT: version dockerbuild
+.PHONY: debug release clean version revive push all tag upload
 
 SOURCES = $(shell find . -type f -name '*.go')
 STATICFILES = $(shell find static -type f)
@@ -54,17 +53,8 @@ model_gen.go: model.go
 bindata.go: static/stream.html
 	go-bindata -fs static/
 
-dockerbuild:
-	bash dockerbuild.sh
-
-docker:
-	docker build -t reaper:${VERSION} .
-
 clean:
 	rm -f ${BINARY} ${BINARY}_debug
-
-version:
-	echo ${VERSION}
 
 revive: 
 	revive -formatter stylish ./...

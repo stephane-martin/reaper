@@ -84,22 +84,10 @@ Install
 
 -  Compile from source
 
-   The Go compiler and ``dep`` (https://golang.github.io/dep) are
-   required
-
    ``git clone https://github.com/stephane-martin/reaper`` in an
    appropriate folder (GOPATH…)
 
    ``make debug`` or ``make release``
-
--  Compile from source using Docker
-
-   If you can’t install Golang and dep, you can also compile reaper
-   using Docker
-
-   ``git clone https://github.com/stephane-martin/reaper``
-
-   ``sudo make dockerbuild``
 
 Configure
 ---------
@@ -367,6 +355,7 @@ If started with ``--http-address``, reaper exposes a HTTP API.
 Endpoints:
 
 -  /status => just returns 200 HTTP status code.
+
 -  /metrics => prometheus metrics (with the embedded nsqd metrics).
 
 -  POST /download/:clientid?wait=3000&size=1000 => creates a channel of
