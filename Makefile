@@ -7,7 +7,7 @@ GITHUB_TOKEN = $(shell cat token)
 
 BINARY=reaper
 FULL=github.com/stephane-martin/reaper
-VERSION=0.1.0
+VERSION=0.1.1
 LDFLAGS=-ldflags '-X main.Version=${VERSION} -X main.GinMode=debug'
 LDFLAGS_RELEASE=-ldflags '-w -s -X main.Version=${VERSION} -X main.GinMode=release'
 
