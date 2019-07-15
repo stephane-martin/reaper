@@ -1,8 +1,8 @@
 .SUFFIXES:
-.PHONY: debug release clean version revive dockerbuild docker push all tag upload install_vendor
+.PHONY: debug release clean version revive dockerbuild docker push all tag upload
 .SILENT: version dockerbuild
 
-SOURCES = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
+SOURCES = $(shell find . -type f -name '*.go')
 STATICFILES = $(shell find static -type f)
 GITHUB_TOKEN = $(shell cat token)
 
@@ -14,9 +14,6 @@ LDFLAGS_RELEASE=-ldflags '-w -s -X main.Version=${VERSION} -X main.GinMode=relea
 
 debug: ${BINARY}_debug
 release: ${BINARY}
-
-install_vendor:
-	go install -i ./vendor/...
 
 tag:
 	git add .
@@ -70,7 +67,7 @@ version:
 	echo ${VERSION}
 
 revive: 
-	revive -formatter stylish -exclude vendor/... ./...
+	revive -formatter stylish ./...
 
 README.rst: docs/README.md
 	pandoc --from markdown --to rst --toc --number-sections --standalone -o README.rst docs/README.md
