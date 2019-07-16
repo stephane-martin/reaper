@@ -22,7 +22,12 @@ tag:
 	git push --tags
 
 upload: all
-	github-release ${VERSION} reaper_linux_amd64 reaper_linux_arm reaper_linux_arm64 reaper_openbsd_amd64 reaper_freebsd_amd64 --tag ${VERSION} --github-repository stephane-martin/reaper --github-access-token ${GITHUB_TOKEN}
+	github-release release --user stephane-martin --repo reaper --tag "${VERSION}" --name "v${VERSION}" --description "Version ${VERSION}" --security-token "${GITHUB_TOKEN}"
+	github-release upload --user stephane-martin --tag "${VERSION}" --repo reaper --security-token "${GITHUB_TOKEN}" --file reaper_linux_amd64 --name reaper_linux_amd64
+	github-release upload --user stephane-martin --tag "${VERSION}" --repo reaper --security-token "${GITHUB_TOKEN}" --file reaper_linux_arm --name reaper_linux_arm
+	github-release upload --user stephane-martin --tag "${VERSION}" --repo reaper --security-token "${GITHUB_TOKEN}" --file reaper_linux_arm64 --name reaper_linux_arm64
+	github-release upload --user stephane-martin --tag "${VERSION}" --repo reaper --security-token "${GITHUB_TOKEN}" --file reaper_openbsd_amd64 --name reaper_openbsd_amd64
+	github-release upload --user stephane-martin --tag "${VERSION}" --repo reaper --security-token "${GITHUB_TOKEN}" --file reaper_freebsd_amd64 --name reaper_freebsd_amd64
 
 ${BINARY}_debug: ${SOURCES} ${STATICFILES} model_gen.go bindata.go 
 	CGO_ENABLED=0 go build -x -tags 'netgo osusergo' -o ${BINARY}_debug ${LDFLAGS} ${FULL}
