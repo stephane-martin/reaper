@@ -189,7 +189,7 @@ func escapeString(s string, buf *bytes.Buffer) {
 			needsEscape = true
 		}
 	}
-	if needsEscape == false && needsQuotes == false {
+	if !needsEscape && !needsQuotes {
 		buf.WriteString(s)
 		return
 	}

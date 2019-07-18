@@ -481,7 +481,7 @@ func BuildApp() *cli.App {
 
 					go func() {
 						deadline := time.Now().Add(time.Second)
-						entries := make([]PGEntries, 0, 0)
+						entries := make([]PGEntries, 0)
 						chEntries := ch
 
 					L:
