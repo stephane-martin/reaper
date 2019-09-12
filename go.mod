@@ -11,7 +11,7 @@ require (
 	github.com/dop251/goja v0.0.0-20190625200431-3f2f11566cd5
 	github.com/fortytw2/leaktest v1.3.0 // indirect
 	github.com/gin-gonic/gin v1.4.0
-	github.com/go-redis/redis v6.15.3+incompatible
+	github.com/go-redis/redis v6.15.5+incompatible
 	github.com/go-sourcemap/sourcemap v2.1.2+incompatible // indirect
 	github.com/go-stomp/stomp v2.0.3+incompatible
 	github.com/google/renameio v0.1.0
@@ -27,6 +27,8 @@ require (
 	github.com/nsqio/nsq v1.1.0
 	github.com/oklog/ulid v1.3.1
 	github.com/olivere/elastic v6.2.21+incompatible
+	github.com/onsi/ginkgo v1.8.0 // indirect
+	github.com/onsi/gomega v1.5.0 // indirect
 	github.com/orcaman/concurrent-map v0.0.0-20190314100340-2693aad1ed75
 	github.com/philhofer/fwd v1.0.0 // indirect
 	github.com/pkg/errors v0.8.1
